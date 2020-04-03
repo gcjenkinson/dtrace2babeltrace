@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2019-20 (Graeme Jenkinson)
+ * Copyright (c) 2019-2020 (Graeme Jenkinson)
  * All rights reserved.
  *
  * This software was developed by BAE Systems, the University of Cambridge
@@ -53,7 +53,7 @@ static char const * const CLOCK_NAME = "dtrace";
 static char const * const STREAM_NAME = "dtrace";
 static char const * const TMP_DIRNAME = "dof2ctf_XXXXXX";
 
-void
+bool
 dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
     bt_self_component *self_comp)
 {
@@ -86,7 +86,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	if (rc != 0) {
 
 		BT_LOGE_STR("Failed parsing DOF\n");
-		return;
+		return false;
 	}
 
 	rc = dof_load_header(dof, &hdr);
@@ -575,7 +575,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	/* Destroy the DOF object */
 	dof_destroy(dof);
 
-	return;
+	return true;
 
 err_put_ref_stream:
 	bt_ctf_object_put_ref(stream);
@@ -588,5 +588,5 @@ err_put_ref_writer:
 
 err_destroy_dof:
 	dof_destroy(dof);
-	return;
+	return false;
 }

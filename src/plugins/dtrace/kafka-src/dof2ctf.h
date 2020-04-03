@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2019 (Graeme Jenkinson)
+ * Copyright (c) 2019-2020 (Graeme Jenkinson)
  * All rights reserved.
  *
  * This software was developed by BAE Systems, the University of Cambridge
@@ -34,8 +34,9 @@
 #define _DOF2CTF_H
 
 #include <stdio.h>
+#include <stdbool.h>
 
-extern void dof2ctf(char *, size_t, FILE *, bt_logging_level,
+extern bool dof2ctf(char *, size_t, FILE *, bt_logging_level,
     bt_self_component *);
 
 #endif

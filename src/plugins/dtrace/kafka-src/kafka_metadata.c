@@ -219,8 +219,16 @@ kafka_metadata_update(struct kafka_trace *trace)
 			}
 
 			/* Convert the DOF into TSDL */
-			dof2ctf(rkmessage->payload, rkmessage->len, fp,
-			    log_level, self_comp);
+			if (!dof2ctf(rkmessage->payload, rkmessage->len, fp,
+			    log_level, self_comp)) {
+
+				BT_COMP_LOGE("Failed to convert DOF to CTF");
+
+				/* Free the Kafka message containing the DOF */
+				rd_kafka_message_destroy(rkmessage);
+				status = KAFKA_ITERATOR_STATUS_ERROR;
+				goto error;
+			}
 	
 			/* Free the Kafka message containing the DOF */
 			rd_kafka_message_destroy(rkmessage);
