@@ -56,10 +56,10 @@
 #include "kafka_stream_iter.h"
 #include "kafka_trace.h"
 
-#define BOOTSTRAP_SERVERS_PARAM		"bootstrap.servers"
+#define OFFSET_PARAM			"offset"
+#define MAX_QUERY_SIZE_PARAM		"max_query_sz"
+#define RDKAFKA_CONF_PARAM		"rdkafka_conf"
 #define TOPIC_PARAM			"topic"
-#define GROUP_ID_PARAM			"group.id"
-#define MAX_QUERY_SIZE_PARAM		"receive.max.message.bytes"
 
 #define DEFAULT_GROUP_ID		"src.dtrace.kafka"
 #define MAX_QUERY_SIZE			(1024*1024)
@@ -70,35 +70,157 @@
 struct kafka_component {
 	bt_logging_level log_level;
 	bt_self_component *self_comp; /* Borrowed ref. */
-	GString *bootstrap_servers; /* Owned by this. */
-	GString *group_id; /* Owned by this. */
 	GString *topic; /* Owned by this. */
 	size_t max_query_sz;
+	rd_kafka_conf_t *conf;
+	int64_t offset;
 	/*
 	 * Keeps track of whether the downstream component already has a
 	 * message iterator on this component.
 	 */
 	bool has_msg_iter;
+//	bool from_beginning;
 };
 
 static bt_component_class_initialize_method_status kafka_component_create(
     const bt_value *, bt_logging_level, bt_self_component *,
     struct kafka_component **);
 static void kafka_component_destroy_data(struct kafka_component *);
+static enum bt_param_validation_status rdkafka_conf_validation(bt_value *,
+    struct bt_param_validation_context *);
+static bt_value_map_foreach_entry_func_status rdkafka_conf_validate_entry(
+    const char *, bt_value *, void *);
 
 static struct bt_param_validation_map_value_entry_descr params_descr[] = {
-	{ BOOTSTRAP_SERVERS_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_MANDATORY,
-	    { .type = BT_VALUE_TYPE_STRING }},
+	{ OFFSET_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
+	    { .type = BT_VALUE_TYPE_STRING}},
 	{ TOPIC_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_MANDATORY,
 	    { .type = BT_VALUE_TYPE_STRING }},
-	{ GROUP_ID_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
-            { .type = BT_VALUE_TYPE_STRING }},
 	{ MAX_QUERY_SIZE_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
             { .type = BT_VALUE_TYPE_SIGNED_INTEGER}},
+	{ RDKAFKA_CONF_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
+	    { .type = BT_VALUE_TYPE_MAP, .validation_func = rdkafka_conf_validation 
+	} },
 	BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_END
 };
 
 static char const * const OUT_PORT_NAME = "out";
+
+extern const struct rd_kafka_property* rd_kafka_conf_prop_find(int, const char *);
+
+static bt_value_map_foreach_entry_func_status
+rdkafka_conf_validate_entry(const char *key, bt_value *object, void *data)
+{
+	rd_kafka_conf_t *conf = (rd_kafka_conf_t *) data;
+	char errstr[256];
+	char *value;
+
+	if (bt_value_is_bool(object)) {
+
+		size_t sz;
+
+		sz = snprintf(NULL, 0, "%s",
+		    bt_value_bool_get(object) == true ? "true" : "false");
+		value = alloca(sz + 1);
+		snprintf(value, sz + 1, "%s",
+		    bt_value_bool_get(object) == true ? "true" : "false");
+
+	} else if (bt_value_is_signed_integer(object)) {
+
+		size_t sz;
+
+		sz = snprintf(NULL, 0, "%d", bt_value_integer_unsigned_get(object));
+		value = alloca(sz + 1);
+		snprintf(value, sz + 1, "%d", bt_value_integer_unsigned_get(object));
+	} else if (bt_value_is_unsigned_integer(object)) {
+
+		size_t sz;
+
+		sz = snprintf(NULL, 0, "%u", bt_value_integer_unsigned_get(object));
+		value = alloca(sz + 1);
+		snprintf(value, sz + 1, "%u", bt_value_integer_unsigned_get(object));
+	} else if (bt_value_is_string(object)) {
+
+		value = bt_value_string_get(object);
+	} else {
+
+		return BT_VALUE_MAP_FOREACH_ENTRY_FUNC_STATUS_INTERRUPT;
+	}
+
+	if (rd_kafka_conf_set(conf, key, value,
+	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
+		
+		return BT_VALUE_MAP_FOREACH_ENTRY_FUNC_STATUS_INTERRUPT;
+	}
+
+	return BT_VALUE_MAP_FOREACH_ENTRY_FUNC_STATUS_OK;
+}	
+
+static enum bt_param_validation_status rdkafka_conf_validation(bt_value *value,
+    struct bt_param_validation_context *context)
+{
+	bt_value_map_foreach_entry_func_status status;
+	rd_kafka_conf_t *conf;
+
+	/* Validate that the parameter is specified as a map */
+	if (!bt_value_is_map(value)) {
+
+		return bt_param_validation_error(context,
+		   "rdkafka_conf param not specified as a map");
+	}	
+
+	conf = rd_kafka_conf_new();
+	if (conf == NULL) {
+
+		return bt_param_validation_error(context,
+		   "unable to validate rdkafka_conf");
+	}
+
+	/* Validate that entries in the map are valid rdkafka configuration
+	 * options.
+	 */
+	status = bt_value_map_foreach_entry_const(value,
+	    rdkafka_conf_validate_entry, conf);
+	if (status != BT_VALUE_MAP_FOREACH_ENTRY_STATUS_OK) {
+	
+		rd_kafka_conf_destroy(conf);
+		return bt_param_validation_error(context,
+		    "Invalid rdkafka configuration parameter");
+	}
+
+	rd_kafka_conf_destroy(conf);
+
+	return BT_PARAM_VALIDATION_STATUS_OK;
+}
+
+/*
+ * Apply parameter with key `key` to `option`.  Use `def` as the value, if
+ * the parameter is not specified.
+ */
+static void
+apply_one_bool_with_default(const char *key, const bt_value *params,
+    bool *option, bool def)
+{
+	const bt_value *value;
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(key != NULL);
+	BT_ASSERT(params != NULL);
+	BT_ASSERT(option != NULL);
+
+	value = bt_value_map_borrow_entry_value_const(params, key);
+	if (value != NULL) {
+
+		bt_bool bool_val;
+
+		BT_ASSERT_DBG(value != NULL);
+		bool_val = bt_value_bool_get(value);
+
+		*option = (bool) bool_val;
+	} else {
+		*option = def;
+	}
+}
 
 static void
 apply_one_unsigned_integer(const char *key, const bt_value *params,
@@ -162,6 +284,10 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 	enum bt_param_validation_status validation_status;
 	gchar *validation_error = NULL;
 	bt_component_class_initialize_method_status status;
+	bt_value *rdkafka_conf;
+	char *buf, *offset;
+	size_t buf_sz;
+	char errstr[256];
 
 	/* Validate the method's preconditions */
 	BT_ASSERT(params != NULL);
@@ -195,9 +321,71 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 	    &kafka->max_query_sz, MAX_QUERY_SIZE);
 	kafka->has_msg_iter = false;
 	
-	apply_one_string(BOOTSTRAP_SERVERS_PARAM, params, &kafka->bootstrap_servers, "");
 	apply_one_string(TOPIC_PARAM, params, &kafka->topic, "");
-	apply_one_string(GROUP_ID_PARAM, params, &kafka->group_id, DEFAULT_GROUP_ID);
+
+	/* Parse the offset param if present */
+	apply_one_string(OFFSET_PARAM, params, &offset, "LATEST");
+	if (strcmp(offset, "EARLIEST") == 0) {
+
+		kafka->offset =  RD_KAFKA_OFFSET_BEGINNING;
+	} else {
+
+		kafka->offset =  RD_KAFKA_OFFSET_END;
+	}
+	
+	rdkafka_conf = bt_value_map_borrow_entry_value_const(params, RDKAFKA_CONF_PARAM);
+	BT_ASSERT_DBG(rdkafka_conf != NULL);
+	
+	kafka->conf = rd_kafka_conf_new();
+	if (kafka->conf == NULL) {
+
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_MEMORY_ERROR;
+		goto end;
+	}
+
+	/* Set some default configuration values */	
+	if (rd_kafka_conf_set(kafka->conf, "group.id", DEFAULT_GROUP_ID,
+	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
+
+		BT_COMP_LOGE("Failed setting Kafka conf\n");
+		rd_kafka_conf_destroy(kafka->conf);
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
+		goto error;
+	}
+	
+	if (rd_kafka_conf_set(kafka->conf, "auto.offset.reset", "earliest",
+	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
+
+		BT_COMP_LOGE("Failed setting Kafka conf\n");
+		rd_kafka_conf_destroy(kafka->conf);
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
+		goto error;
+	}
+
+	buf_sz = snprintf(NULL, 0, "%zu", kafka->max_query_sz);
+	buf = alloca(buf_sz + 1);
+	snprintf(buf, buf_sz + 1, "%zu",  kafka->max_query_sz);
+
+	if (rd_kafka_conf_set(kafka->conf, "receive.message.max.bytes", buf,
+	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
+
+		BT_COMP_LOGE("Failed setting Kafka conf\n");
+		rd_kafka_conf_destroy(kafka->conf);
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
+		goto error;
+	}
+
+	/* Validate that entries in the map are valid rdkafka configuration
+	 * options.
+	 */
+	if (bt_value_map_foreach_entry_const(rdkafka_conf,
+	    rdkafka_conf_validate_entry, kafka->conf) !=
+	    BT_VALUE_MAP_FOREACH_ENTRY_STATUS_OK) {
+	
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
+		rd_kafka_conf_destroy(kafka->conf);
+		goto end;
+	}
 
 	status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK;
 	goto end;
@@ -221,15 +409,7 @@ kafka_component_destroy_data(struct kafka_component *self)
 	}
 	BT_ASSERT_DBG(self != NULL);
 
-	BT_ASSERT_DBG(self->bootstrap_servers != NULL);
-	g_free(self->bootstrap_servers);
-
-	BT_ASSERT_DBG(self->group_id != NULL);
-	g_free(self->group_id);
-
-	BT_ASSERT_DBG(self->topic != NULL);
 	g_free(self->topic);
-
 	g_free(self);
 }
 
@@ -306,9 +486,17 @@ bt_component_class_query_method_status kafka_query(
 	bt_component_class_query_method_status status =
 		BT_COMPONENT_CLASS_QUERY_METHOD_STATUS_OK;
 	bt_self_component *self_comp = NULL;
-	bt_logging_level log_level = bt_query_executor_get_logging_level(
-		bt_private_query_executor_as_query_executor_const(
-			priv_query_exec));
+	bt_logging_level log_level;
+
+	/* Validate the method'd preconditions */
+	BT_ASSERT(comp_class != NULL);
+	BT_ASSERT(priv_query_exec != NULL);
+	BT_ASSERT(object != NULL);
+	BT_ASSERT(result != NULL);
+
+	log_level = bt_query_executor_get_logging_level(
+	    bt_private_query_executor_as_query_executor_const(
+	    priv_query_exec));
 
 	if (strcmp(object, "group.id") == 0) {
 
@@ -317,9 +505,9 @@ bt_component_class_query_method_status kafka_query(
 		char *buf;
 		size_t buf_sz;
 
-		buf_sz = snprintf(NULL, 0, "%zu", MAX_QUERY_SIZE);
+		buf_sz = snprintf(NULL, 0, "%u", MAX_QUERY_SIZE);
 		buf = alloca(buf_sz + 1);
-		snprintf(buf, buf_sz + 1, "%zu", MAX_QUERY_SIZE);
+		snprintf(buf, buf_sz + 1, "%u", MAX_QUERY_SIZE);
 
 		*result = bt_value_string_create_init(buf);
 	} else {
@@ -344,7 +532,8 @@ kafka_graph_is_canceled(struct kafka_msg_iter *msg_iter)
 		goto end;
 	}
 	BT_ASSERT_DBG(msg_iter != NULL);
-
+	    
+	BT_ASSERT_DBG(kafka_msg_iter_get_self_msg_iter(msg_iter) != NULL);
 	ret = bt_self_message_iterator_is_interrupted(
 	    kafka_msg_iter_get_self_msg_iter(msg_iter));
 
@@ -403,26 +592,6 @@ kafka_component_get_logging_level(struct kafka_component *self)
 }
 
 BT_HIDDEN GString  *
-kafka_component_get_bootstrap_servers(struct kafka_component *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->bootstrap_servers;
-}
-
-BT_HIDDEN GString  *
-kafka_component_get_group_id(struct kafka_component *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->group_id;
-}
-
-BT_HIDDEN GString  *
 kafka_component_get_topic(struct kafka_component *self)
 {
 
@@ -430,4 +599,24 @@ kafka_component_get_topic(struct kafka_component *self)
 	BT_ASSERT(self != NULL);
 
 	return self->topic;
+}
+
+BT_HIDDEN rd_kafka_conf_t *
+kafka_component_get_conf(struct kafka_component *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return self->conf;
+}
+	
+BT_HIDDEN int64_t
+kafka_component_get_offset(struct kafka_component *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return self->offset;
 }

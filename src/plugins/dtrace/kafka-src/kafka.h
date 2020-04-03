@@ -34,19 +34,14 @@
  *
  */
 
-#ifndef BABELTRACE_PLUGIN_CTF_KAFKA_H
-#define BABELTRACE_PLUGIN_CTF_KAFKA_H
+#ifndef BABELTRACE_PLUGIN_DRACE_KAFKA_H
+#define BABELTRACE_PLUGIN_DTRACE_KAFKA_H
 
 #include <stdbool.h>
 
 #include "common/macros.h"
 #include <babeltrace2/babeltrace.h>
-
-#ifdef PRIVATE_RDKAFKA 
-#include <private/rdkafka/rdkafka.h>
-#else
 #include <librdkafka/rdkafka.h>
-#endif
 
 #include "common/metadata/decoder.h"
 #include "common/msg-iter/msg-iter.h"
@@ -79,26 +74,17 @@ extern bt_logging_level kafka_component_get_logging_level(struct kafka_component
 extern GString * kafka_component_get_bootstrap_servers(struct kafka_component *);
 extern GString * kafka_component_get_group_id(struct kafka_component *);
 extern GString * kafka_component_get_topic(struct kafka_component *);
-
-void kafka_add_stream_iterator(struct kafka_msg_iter *kafka_msg_iter,
-		struct kafka_stream_iter *stream_iter);
-void kafka_remove_stream_iterator(struct kafka_msg_iter *kafka_msg_iter,
-		struct kafka_stream_iter *stream_iter);
-
-struct kafka_trace *kafka_borrow_trace( struct kafka_topic*, uint64_t);
-void kafka_need_new_streams(struct kafka_msg_iter *);
-
-bool kafka_graph_is_canceled(struct kafka_msg_iter *);
-
+extern rd_kafka_conf_t * kafka_component_get_conf(struct kafka_component *);
 size_t kafka_get_max_request_sz(struct kafka_component *);
-
 extern bt_logging_level kafka_topic_get_logging_level(struct kafka_topic *);
 extern bt_self_component * kafka_topic_get_self_comp(struct kafka_topic *);
 extern struct kafka_msg_iter * kafka_topic_get_kafka_msg_iter(struct kafka_topic *);
 extern bool kafka_topic_is_lazy_stream_msg_init(struct kafka_topic *);
 extern void kafka_topic_set_lazy_stream_msg_init(struct kafka_topic *, bool);
-extern bool kafka_topic_is_new_streams_needed(struct kafka_topic *);
-extern void kafka_topic_set_new_streams_needed(struct kafka_topic *, bool);
+//extern bool kafka_topic_is_new_streams_needed(struct kafka_topic *);
+//extern void kafka_topic_set_new_streams_needed(struct kafka_topic *, bool);
+extern int64_t kafka_topic_get_offset(struct kafka_topic *, bool);
 
-extern int kafka_add_topic(struct kafka_msg_iter *, const char *);
-#endif /* BABELTRACE_PLUGIN_CTF_KAFKA_H */
+bool kafka_graph_is_canceled(struct kafka_msg_iter *);
+
+#endif /* BABELTRACE_PLUGIN_DTRACE_KAFKA_H */

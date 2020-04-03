@@ -191,73 +191,8 @@ kafka_msg_iter_init(bt_self_message_iterator *self_msg_it,
 	kafka_msg_iter->kafka_comp = kafka;
 	kafka_msg_iter->self_msg_iter = self_msg_it;
 
-	conf = rd_kafka_conf_new();
-	if (conf == NULL) {
-
-		BT_COMP_LOGE("Failed creating Kafka conf\n");
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
-
-	if (rd_kafka_conf_set(conf, "bootstrap.servers",
-	    kafka_component_get_bootstrap_servers(kafka), errstr,
-	    sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-
-		BT_COMP_LOGE("Failed setting Kafka conf\n");
-		rd_kafka_conf_destroy(conf);
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
-
-	if (rd_kafka_conf_set(conf, "compression.codec", "gzip",
-	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-
-		BT_COMP_LOGE("Failed setting Kafka conf\n");
-		rd_kafka_conf_destroy(conf);
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
-	
-	if (rd_kafka_conf_set(conf, "group.id",
-	    kafka_component_get_group_id(kafka),
-	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-
-		BT_COMP_LOGE("Failed setting Kafka conf\n");
-		rd_kafka_conf_destroy(conf);
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
-	
-	if (rd_kafka_conf_set(conf, "auto.offset.reset", "earliest",
-	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-
-		BT_COMP_LOGE("Failed setting Kafka conf\n");
-		rd_kafka_conf_destroy(conf);
-		goto error;
-	}
-	
-	if (rd_kafka_conf_set(conf, "linger.ms", "10",
-	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-
-		BT_COMP_LOGE("Failed setting Kafka conf\n");
-		rd_kafka_conf_destroy(conf);
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
-
-	buf_sz = snprintf(NULL, 0, "%zu", kafka_get_max_request_sz(kafka));
-	buf = alloca(buf_sz + 1);
-	snprintf(buf, buf_sz + 1, "%zu", kafka_get_max_request_sz(kafka));
-	BT_COMP_LOGI("receive.message.max.bytes = %s\n", buf);
-
-	if (rd_kafka_conf_set(conf, "receive.message.max.bytes", buf,
-	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-
-		BT_COMP_LOGE("Failed setting Kafka conf\n");
-		rd_kafka_conf_destroy(conf);
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
+	conf = kafka_component_get_conf(kafka);
+	BT_ASSERT_DBG(conf != NULL);
 
 	kafka_msg_iter->consumer = rd_kafka_new(RD_KAFKA_CONSUMER, conf,
 	    errstr, sizeof(errstr));
@@ -302,8 +237,8 @@ kafka_msg_iter_init(bt_self_message_iterator *self_msg_it,
 	}
 
 	if (rd_kafka_topic_partition_list_set_offset(subscription,
-	    kafka_component_get_topic(kafka),
-	    RD_KAFKA_PARTITION_UA, RD_KAFKA_OFFSET_END) !=RD_KAFKA_RESP_ERR_NO_ERROR) {
+	    kafka_component_get_topic(kafka), RD_KAFKA_PARTITION_UA,
+	    kafka_component_get_offset(kafka)) !=RD_KAFKA_RESP_ERR_NO_ERROR) {
 
 
 		BT_COMP_LOGE("Failed setting Kafka topic/partition (%s) offset\n",
