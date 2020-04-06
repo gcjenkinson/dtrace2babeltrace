@@ -34,23 +34,22 @@
  *
  */
 
-#ifndef KAFKA_METADATA_H
-#define KAFKA_METADATA_H
-
-#include <stdio.h>
-#include <glib.h>
-#include <babeltrace2/babeltrace.h>
+#ifndef BABELTRACE_PLUGIN_DTRACE_KAFKA_METADATA_H
+#define BABELTRACE_PLUGIN_DTRACE_KAFKA_METADATA_H
 
 #include "common/metadata/decoder.h"
-#include "common/macros.h"
-#include "kafka.h"
+
+#include "kafka_trace.h"
+
+/* Forward declaration */
+struct kafka_metadata;
 
 extern int kafka_metadata_create(struct kafka_metadata **, bt_logging_level,
-    bt_self_component *); //, uint64_t, uint64_t);
+    bt_self_component *);
 extern void kafka_metadata_fini(struct kafka_trace *);
 
 extern enum kafka_iterator_status kafka_metadata_update(struct kafka_trace *);
 extern struct ctf_metadata_decoder * kafka_metadata_get_decoder(
     struct kafka_metadata *);
 
-#endif /* KAFKA_METADATA_H */
+#endif /* BABELTRACE_PLUGIN_DTRACE_KAFKA_METADATA_H */

@@ -34,26 +34,27 @@
  *
  */
 
-#define BT_COMP_LOG_SELF_COMP self_comp
-#define BT_LOG_OUTPUT_LEVEL log_level
-#define BT_LOG_TAG "PLUGIN/SRC.DTRACE.KAFKA/META"
-#include "logging/comp-logging.h"
-
 #include <ctype.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <glib.h>
-#include "compat/memstream.h"
+
 #include <babeltrace2/babeltrace.h>
 
-#include "kafka_metadata.h"
-#include "kafka_trace.h"
+#include "compat/memstream.h"
+#define BT_COMP_LOG_SELF_COMP self_comp
+#define BT_LOG_OUTPUT_LEVEL log_level
+#define BT_LOG_TAG "PLUGIN/SRC.DTRACE.KAFKA/META"
+#include "logging/comp-logging.h"
 #include "common/metadata/decoder.h"
 #include "common/metadata/ctf-meta-configure-ir-trace.h"
 
 #include "dof2ctf.h"
+#include "kafka_metadata.h"
+#include "kafka_msg_iter.h"
+#include "kafka_trace.h"
 
 struct kafka_metadata {
 	bt_logging_level log_level;
