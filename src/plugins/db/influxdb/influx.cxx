@@ -95,7 +95,7 @@ static struct influxdb_component* create_influxdb(bt_self_component *,
     bt_logging_level);
 static bt_message_iterator_class_next_method_status handle_message(
     struct influxdb_component *, const bt_message *);
-static void apply_one_string(const char *, const bt_value *, char **);
+static void apply_one_string(const char *, const bt_value *, const char **);
 static void apply_one_bool_with_default(const char *, const bt_value *,
     bool *, bool);
 static void apply_one_unsigned_integer(const char *, const bt_value *,
@@ -103,29 +103,21 @@ static void apply_one_unsigned_integer(const char *, const bt_value *,
 static bt_component_class_initialize_method_status apply_params(
     struct influxdb_component *, const bt_value *);
 static void write_field(struct influxdb_component *, influxdb::Point &,
-    char *, const bt_field *);
+    const char *, const bt_field *);
 static void write_bool(struct influxdb_component *, influxdb::Point &,
-    char *, const bt_field *);
+    const char *, const bt_field *);
 static void write_integer(struct influxdb_component *, influxdb::Point &,
-    char *, const bt_field *);
+    const char *, const bt_field *);
 static void write_struct(struct influxdb_component *, influxdb::Point &,
-    char *, const bt_field *);
+    const char *, const bt_field *);
 static void write_struct_field(struct influxdb_component *, influxdb::Point &,
-    char *, const bt_field_class_structure_member *, const bt_field *);
+    const char *, const bt_field_class_structure_member *, const bt_field *);
 
-//static const struct bt_param_validation_value_descr tags_elem = {
-//	.type = BT_VALUE_TYPE_STRING, {}
-//};
-
-static const struct bt_param_validation_map_value_entry_descr influxdb_params[] = {
+static struct bt_param_validation_map_value_entry_descr influxdb_params[] = {
 	{ BATCH_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
     	    { .type = BT_VALUE_TYPE_SIGNED_INTEGER} },
     	{ PWD_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
     	    { .type = BT_VALUE_TYPE_STRING } },
-//    	{ TAGS_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
-//    	    { .type = BT_VALUE_TYPE_ARRAY, .array = {
-//    	    .min_length = 0, .max_length = BT_PARAM_VALIDATION_INFINITE,
-//    	    .element_type = &tags_elem, } } },
     	{ URI_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_MANDATORY,
     	    { .type = BT_VALUE_TYPE_STRING } },
     	{ USER_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
@@ -163,7 +155,8 @@ create_influxdb(bt_self_component *self_comp, bt_logging_level log_level)
 	/* Verify the method's preconditions */
 	BT_ASSERT(self_comp != NULL);
 
-	influxdb = malloc(sizeof(struct influxdb_component));
+	influxdb = (struct influxdb_component *) malloc(
+	    sizeof(struct influxdb_component));
 	if (influxdb == NULL) {
 
 		goto error;
@@ -181,7 +174,7 @@ error:
 
 static void
 write_field(struct influxdb_component *influxdb, influxdb::Point &p,
-    char *name, const bt_field *field)
+    const char *name, const bt_field *field)
 {
 	bt_self_component *self_comp = influxdb->self_comp;
 	bt_logging_level log_level = influxdb->log_level;
@@ -211,14 +204,14 @@ write_field(struct influxdb_component *influxdb, influxdb::Point &p,
 		/* FALLTHROUGH */
 	default:
 		/* TODO: implement other types  */
-		BT_COMP_LOGW("class_id %d unimplemented\n", class_id);
+		BT_COMP_LOGW("class_id %ld unimplemented\n", class_id);
 		break;
 	}
 }
 
 static void
 write_bool(struct influxdb_component *influxdb, influxdb::Point &p,
-    char *field_name, const bt_field *field)
+    const char *field_name, const bt_field *field)
 {
 	bt_bool v;
 
@@ -234,7 +227,7 @@ write_bool(struct influxdb_component *influxdb, influxdb::Point &p,
 
 static void
 write_integer(struct influxdb_component *influxdb, influxdb::Point &p,
-    char *field_name, const bt_field *field)
+    const char *field_name, const bt_field *field)
 {
 	const bt_field_class *int_fc;
 	bt_field_class_type ft_type;
@@ -248,7 +241,6 @@ write_integer(struct influxdb_component *influxdb, influxdb::Point &p,
 	BT_ASSERT_DBG(int_fc != NULL);
 
 	ft_type = bt_field_get_class_type(field);
-	BT_ASSERT_DBG(ft_type != NULL);
 	if (bt_field_class_type_is(ft_type,
 	    BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER)) {
 
@@ -263,7 +255,7 @@ write_integer(struct influxdb_component *influxdb, influxdb::Point &p,
 
 static void
 write_struct(struct influxdb_component *influxdb, influxdb::Point &p,
-    char *field_name, const bt_field *field)
+    const char *field_name, const bt_field *field)
 {
 	const bt_field_class *struct_class = NULL;
 	uint64_t nr_fields;
@@ -299,7 +291,7 @@ write_struct(struct influxdb_component *influxdb, influxdb::Point &p,
 
 static void
 write_struct_field(struct influxdb_component *influxdb,
-    influxdb::Point &p, char *field_name,
+    influxdb::Point &p, const char *field_name,
     const bt_field_class_structure_member *member, const bt_field *field)
 {
 	const char *member_field_name;
@@ -419,7 +411,7 @@ handle_message(struct influxdb_component *influxdb, const bt_message *message)
 }
 
 static void
-apply_one_string(const char *key, const bt_value *params, char **option)
+apply_one_string(const char *key, const bt_value *params, char const **option)
 {
 	const bt_value *value = NULL;
 	const char *str;
@@ -502,12 +494,12 @@ apply_one_bool_with_default(const char *key, const bt_value *params,
 static bt_component_class_initialize_method_status
 apply_params(struct influxdb_component *influxdb, const bt_value *params)
 {
-	int status;
+	bt_component_class_initialize_method_status status;
     	bt_logging_level log_level = influxdb->log_level;
     	bt_self_component *self_comp = influxdb->self_comp;
 	enum bt_param_validation_status validation_status;
 	gchar *validate_error = NULL;
-	char *user = NULL, *passwd = NULL, *uri;
+	const char *user = NULL, *passwd = NULL, *uri;
 	unsigned int port = 0, batch = 0;
 
 
@@ -595,9 +587,14 @@ influxdb_init(bt_self_component_sink *self_comp_sink,
 
 	add_port_status = bt_self_component_sink_add_input_port(
 		self_comp_sink, IN_PORT_NAME, NULL, NULL);
-	if (add_port_status != BT_SELF_COMPONENT_ADD_PORT_STATUS_OK) {
-
-		status = (int) add_port_status;
+	switch (add_port_status) {
+	case BT_SELF_COMPONENT_ADD_PORT_STATUS_MEMORY_ERROR:
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_MEMORY_ERROR;
+		goto error;
+	case BT_SELF_COMPONENT_ADD_PORT_STATUS_ERROR:
+		/* FALLTHROUGH */
+	default:
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 		goto error;
 	}
 
@@ -621,21 +618,25 @@ end:
 BT_HIDDEN void
 influxdb_finalize(bt_self_component_sink *comp)
 {
+	struct influxdb_component *self;
+
 	if (comp == NULL) {
 
 		return;
 	}
 
-	destroy_influxdb_data(
-	    bt_self_component_get_data(
-	    bt_self_component_sink_as_self_component(comp)));
+	self = (struct influxdb_component *) bt_self_component_get_data(
+	    bt_self_component_sink_as_self_component(comp));
+	BT_ASSERT_DBG(self != NULL);
+
+	destroy_influxdb_data(self);
 }
 
 BT_HIDDEN bt_component_class_sink_consume_method_status
 influxdb_consume(bt_self_component_sink *comp)
 {
 	bt_component_class_sink_consume_method_status ret =
-		BT_COMPONENT_CLASS_SINK_CONSUME_METHOD_STATUS_OK;
+	    BT_COMPONENT_CLASS_SINK_CONSUME_METHOD_STATUS_OK;
 	bt_message_array_const msgs;
 	bt_message_iterator *it;
 	struct influxdb_component *influxdb;
@@ -645,7 +646,7 @@ influxdb_consume(bt_self_component_sink *comp)
 	/* Verify the method's preconditions */
 	BT_ASSERT(comp != NULL);
 	
-	influxdb = bt_self_component_get_data(
+	influxdb = (struct influxdb_component *) bt_self_component_get_data(
 	    bt_self_component_sink_as_self_component(comp));
 	BT_ASSERT_DBG(influxdb);
 	BT_ASSERT_DBG(influxdb->iterator != NULL);
@@ -658,12 +659,13 @@ influxdb_consume(bt_self_component_sink *comp)
 	case BT_MESSAGE_ITERATOR_NEXT_STATUS_OK:
 		break;
 	case BT_MESSAGE_ITERATOR_NEXT_STATUS_MEMORY_ERROR:
-		/* FALLTHROUGH */
+		ret = BT_COMPONENT_CLASS_SINK_CONSUME_METHOD_STATUS_MEMORY_ERROR;
+		goto end;
 	case BT_MESSAGE_ITERATOR_NEXT_STATUS_AGAIN:
-		ret = (int) next_status;
+		ret = BT_COMPONENT_CLASS_SINK_CONSUME_METHOD_STATUS_AGAIN;
 		goto end;
 	case BT_MESSAGE_ITERATOR_NEXT_STATUS_END:
-		ret = (int) next_status;
+		ret = BT_COMPONENT_CLASS_SINK_CONSUME_METHOD_STATUS_END;
 		BT_MESSAGE_ITERATOR_PUT_REF_AND_RESET(
 		    influxdb->iterator);
 		goto end;
@@ -676,9 +678,10 @@ influxdb_consume(bt_self_component_sink *comp)
 
 	for (i = 0; i < count; i++) {
 
-		ret = (int) handle_message(influxdb, msgs[i]);
-		if (ret) {
+		if (handle_message(influxdb, msgs[i]) !=
+		    BT_MESSAGE_ITERATOR_CLASS_NEXT_METHOD_STATUS_OK) {
 
+			ret = BT_COMPONENT_CLASS_SINK_CONSUME_METHOD_STATUS_ERROR;
 			goto end;
 		}
 
@@ -705,7 +708,7 @@ influxdb_graph_is_configured(bt_self_component_sink *comp)
 	/* Verify the method's preconditions */
 	BT_ASSERT(comp != NULL);
 
-	influxdb = bt_self_component_get_data(
+	influxdb = (struct influxdb_component *) bt_self_component_get_data(
 	    bt_self_component_sink_as_self_component(comp));
 	BT_ASSERT_DBG(influxdb != NULL);
 	BT_ASSERT_DBG(influxdb->iterator != NULL);
@@ -713,15 +716,18 @@ influxdb_graph_is_configured(bt_self_component_sink *comp)
 	msg_iter_status = bt_message_iterator_create_from_sink_component(
 	    comp, bt_self_component_sink_borrow_input_port_by_name(comp,
 	    IN_PORT_NAME), &influxdb->iterator);
-	if (msg_iter_status !=
-	    BT_MESSAGE_ITERATOR_CREATE_FROM_SINK_COMPONENT_STATUS_OK) {
-
-		status = (int) msg_iter_status;
-		goto end;
+	switch (msg_iter_status) {
+	case BT_MESSAGE_ITERATOR_CREATE_FROM_SINK_COMPONENT_STATUS_OK:
+		status = BT_COMPONENT_CLASS_SINK_GRAPH_IS_CONFIGURED_METHOD_STATUS_OK;
+		break;
+	case BT_MESSAGE_ITERATOR_CREATE_FROM_SINK_COMPONENT_STATUS_MEMORY_ERROR:
+		status = BT_COMPONENT_CLASS_SINK_GRAPH_IS_CONFIGURED_METHOD_STATUS_MEMORY_ERROR;
+		break;
+	case BT_MESSAGE_ITERATOR_CREATE_FROM_SINK_COMPONENT_STATUS_ERROR:
+		/* FALLTHROUGH */
+	default:
+		status = BT_COMPONENT_CLASS_SINK_GRAPH_IS_CONFIGURED_METHOD_STATUS_ERROR;
+		break;
 	}
-
-	status = BT_COMPONENT_CLASS_SINK_GRAPH_IS_CONFIGURED_METHOD_STATUS_OK;
-
-end:
 	return status;
 }
