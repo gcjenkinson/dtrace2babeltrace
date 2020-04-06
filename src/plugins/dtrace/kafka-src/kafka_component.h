@@ -39,52 +39,29 @@
 
 #include <stdbool.h>
 
-#include "common/macros.h"
 #include <babeltrace2/babeltrace.h>
 #include <librdkafka/rdkafka.h>
 
-#include "common/metadata/decoder.h"
-#include "common/msg-iter/msg-iter.h"
-
-#include "kafka_msg_iter.h"
-
+/* Forward declaration */
 struct kafka_component;
-struct kafka_trace;
-struct kafka_topic;
 
-struct kafka_stream_iter;
-struct kafka_metadata;
+extern bt_component_class_initialize_method_status kafka_component_init(
+    bt_self_component_source *, bt_self_component_source_configuration *,
+    const bt_value *, void *);
+extern void kafka_component_finalize(bt_self_component_source *component);
+extern bt_component_class_query_method_status kafka_query(
+    bt_self_component_class_source *, bt_private_query_executor *,
+    const char *, const bt_value *, void *, const bt_value **);
 
-bt_component_class_initialize_method_status kafka_component_init(
-		bt_self_component_source *self_comp,
-		bt_self_component_source_configuration *config,
-		const bt_value *params, void *init_method_data);
-
-bt_component_class_query_method_status kafka_query(
-    bt_self_component_class_source *comp_class,
-    bt_private_query_executor *priv_query_exec,
-    const char *object, const bt_value *params,
-    void *method_data, const bt_value **result);
-
-void kafka_component_finalize(bt_self_component_source *component);
-extern bool kafka_component_has_msg_iter(struct kafka_component *);
-extern void kafka_component_set_has_msg_iter(struct kafka_component *, bool);
 extern bt_self_component * kafka_component_get_self_comp(struct kafka_component *);
 extern bt_logging_level kafka_component_get_logging_level(struct kafka_component *);
-extern GString * kafka_component_get_bootstrap_servers(struct kafka_component *);
-extern GString * kafka_component_get_group_id(struct kafka_component *);
-extern GString * kafka_component_get_topic(struct kafka_component *);
-extern rd_kafka_conf_t * kafka_component_get_conf(struct kafka_component *);
-size_t kafka_get_max_request_sz(struct kafka_component *);
-extern bt_logging_level kafka_topic_get_logging_level(struct kafka_topic *);
-extern bt_self_component * kafka_topic_get_self_comp(struct kafka_topic *);
-extern struct kafka_msg_iter * kafka_topic_get_kafka_msg_iter(struct kafka_topic *);
-extern bool kafka_topic_is_lazy_stream_msg_init(struct kafka_topic *);
-extern void kafka_topic_set_lazy_stream_msg_init(struct kafka_topic *, bool);
-//extern bool kafka_topic_is_new_streams_needed(struct kafka_topic *);
-//extern void kafka_topic_set_new_streams_needed(struct kafka_topic *, bool);
-extern int64_t kafka_topic_get_offset(struct kafka_topic *, bool);
 
-bool kafka_graph_is_canceled(struct kafka_msg_iter *);
+extern rd_kafka_conf_t * kafka_component_get_conf(struct kafka_component *);
+extern size_t kafka_component_get_max_request_sz(struct kafka_component *);
+extern int64_t kafka_component_get_offset(struct kafka_component *);
+extern char * kafka_component_get_topic_name(struct kafka_component *);
+
+extern bool kafka_component_has_msg_iter(struct kafka_component *);
+extern void kafka_component_set_has_msg_iter(struct kafka_component *, bool);
 
 #endif /* BABELTRACE_PLUGIN_DTRACE_KAFKA_H */

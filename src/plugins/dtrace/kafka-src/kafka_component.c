@@ -34,27 +34,18 @@
  *
  */
 
+#include <glib.h>
+
+#include <babeltrace2/babeltrace.h>
+#include <babeltrace2/types.h>
+
 #define BT_COMP_LOG_SELF_COMP self_comp
 #define BT_LOG_OUTPUT_LEVEL log_level
 #define BT_LOG_TAG "PLUGIN/SRC.DTRACE.KAFKA"
 #include "logging/comp-logging.h"
-
-#include <glib.h>
-#include <inttypes.h>
-#include <unistd.h>
-
-#include "common/assert.h"
-#include <babeltrace2/babeltrace.h>
-#include "compat/compiler.h"
-#include <babeltrace2/types.h>
-
-#include "plugins/common/muxing/muxing.h"
 #include "plugins/common/param-validation/param-validation.h"
 
-#include "kafka.h"
-#include "kafka_metadata.h"
-#include "kafka_stream_iter.h"
-#include "kafka_trace.h"
+#include "kafka_component.h"
 
 #define OFFSET_PARAM			"offset"
 #define MAX_QUERY_SIZE_PARAM		"max_query_sz"
@@ -62,7 +53,7 @@
 #define TOPIC_PARAM			"topic"
 
 #define DEFAULT_GROUP_ID		"src.dtrace.kafka"
-#define MAX_QUERY_SIZE			(1024*1024)
+#define DEFAULT_MAX_QUERY_SIZE		(1024*1024)
 
 /*
  * A component instance is an iterator on a single session.
@@ -70,26 +61,25 @@
 struct kafka_component {
 	bt_logging_level log_level;
 	bt_self_component *self_comp; /* Borrowed ref. */
-	GString *topic; /* Owned by this. */
+	gchar *topic_name; /* Owned by this. */
 	size_t max_query_sz;
-	rd_kafka_conf_t *conf;
+	rd_kafka_conf_t *conf; /* Owned by this. */
 	int64_t offset;
 	/*
 	 * Keeps track of whether the downstream component already has a
 	 * message iterator on this component.
 	 */
 	bool has_msg_iter;
-//	bool from_beginning;
 };
 
 static bt_component_class_initialize_method_status kafka_component_create(
     const bt_value *, bt_logging_level, bt_self_component *,
     struct kafka_component **);
 static void kafka_component_destroy_data(struct kafka_component *);
-static enum bt_param_validation_status rdkafka_conf_validation(bt_value *,
+static enum bt_param_validation_status rdkafka_conf_validation(const bt_value *,
     struct bt_param_validation_context *);
-static bt_value_map_foreach_entry_func_status rdkafka_conf_validate_entry(
-    const char *, bt_value *, void *);
+static enum bt_value_map_foreach_entry_const_func_status rdkafka_conf_validate_entry(
+    const char *, const struct bt_value *, void *);
 
 static struct bt_param_validation_map_value_entry_descr params_descr[] = {
 	{ OFFSET_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
@@ -99,46 +89,54 @@ static struct bt_param_validation_map_value_entry_descr params_descr[] = {
 	{ MAX_QUERY_SIZE_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
             { .type = BT_VALUE_TYPE_SIGNED_INTEGER}},
 	{ RDKAFKA_CONF_PARAM, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
-	    { .type = BT_VALUE_TYPE_MAP, .validation_func = rdkafka_conf_validation 
+	    { .type = BT_VALUE_TYPE_MAP, .validation_func = rdkafka_conf_validation
 	} },
 	BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_END
 };
 
 static char const * const OUT_PORT_NAME = "out";
 
-extern const struct rd_kafka_property* rd_kafka_conf_prop_find(int, const char *);
 
-static bt_value_map_foreach_entry_func_status
-rdkafka_conf_validate_entry(const char *key, bt_value *object, void *data)
+static enum bt_value_map_foreach_entry_const_func_status
+rdkafka_conf_validate_entry(const char *key, const struct bt_value *object, void *data)
 {
 	rd_kafka_conf_t *conf = (rd_kafka_conf_t *) data;
 	char errstr[256];
-	char *value;
+	const char *value;
 
 	if (bt_value_is_bool(object)) {
 
 		size_t sz;
+		char *buf;
 
 		sz = snprintf(NULL, 0, "%s",
 		    bt_value_bool_get(object) == true ? "true" : "false");
-		value = alloca(sz + 1);
-		snprintf(value, sz + 1, "%s",
+		buf = alloca(sz + 1);
+		snprintf(buf, sz + 1, "%s",
 		    bt_value_bool_get(object) == true ? "true" : "false");
-
+		value = buf;
 	} else if (bt_value_is_signed_integer(object)) {
 
 		size_t sz;
+		char *buf;
 
-		sz = snprintf(NULL, 0, "%d", bt_value_integer_unsigned_get(object));
-		value = alloca(sz + 1);
-		snprintf(value, sz + 1, "%d", bt_value_integer_unsigned_get(object));
+		sz = snprintf(NULL, 0, "%ld",
+		    bt_value_integer_unsigned_get(object));
+		buf = alloca(sz + 1);
+		snprintf(buf, sz + 1, "%ld",
+		    bt_value_integer_unsigned_get(object));
+		value = buf;
 	} else if (bt_value_is_unsigned_integer(object)) {
 
 		size_t sz;
+		char *buf;
 
-		sz = snprintf(NULL, 0, "%u", bt_value_integer_unsigned_get(object));
+		sz = snprintf(NULL, 0, "%lu",
+		    bt_value_integer_unsigned_get(object));
 		value = alloca(sz + 1);
-		snprintf(value, sz + 1, "%u", bt_value_integer_unsigned_get(object));
+		snprintf(buf, sz + 1, "%lu",
+		    bt_value_integer_unsigned_get(object));
+		value = buf;
 	} else if (bt_value_is_string(object)) {
 
 		value = bt_value_string_get(object);
@@ -149,15 +147,15 @@ rdkafka_conf_validate_entry(const char *key, bt_value *object, void *data)
 
 	if (rd_kafka_conf_set(conf, key, value,
 	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
-		
+
 		return BT_VALUE_MAP_FOREACH_ENTRY_FUNC_STATUS_INTERRUPT;
 	}
 
 	return BT_VALUE_MAP_FOREACH_ENTRY_FUNC_STATUS_OK;
-}	
+}
 
-static enum bt_param_validation_status rdkafka_conf_validation(bt_value *value,
-    struct bt_param_validation_context *context)
+static enum bt_param_validation_status rdkafka_conf_validation(
+    const bt_value *value, struct bt_param_validation_context *context)
 {
 	bt_value_map_foreach_entry_func_status status;
 	rd_kafka_conf_t *conf;
@@ -167,7 +165,7 @@ static enum bt_param_validation_status rdkafka_conf_validation(bt_value *value,
 
 		return bt_param_validation_error(context,
 		   "rdkafka_conf param not specified as a map");
-	}	
+	}
 
 	conf = rd_kafka_conf_new();
 	if (conf == NULL) {
@@ -182,7 +180,7 @@ static enum bt_param_validation_status rdkafka_conf_validation(bt_value *value,
 	status = bt_value_map_foreach_entry_const(value,
 	    rdkafka_conf_validate_entry, conf);
 	if (status != BT_VALUE_MAP_FOREACH_ENTRY_STATUS_OK) {
-	
+
 		rd_kafka_conf_destroy(conf);
 		return bt_param_validation_error(context,
 		    "Invalid rdkafka configuration parameter");
@@ -224,7 +222,7 @@ apply_one_bool_with_default(const char *key, const bt_value *params,
 
 static void
 apply_one_unsigned_integer(const char *key, const bt_value *params,
-    unsigned int *option, unsigned int default_val)
+    unsigned long int *option, unsigned int default_val)
 {
 	const bt_value *bt_val;
 
@@ -242,13 +240,13 @@ apply_one_unsigned_integer(const char *key, const bt_value *params,
 
 	BT_ASSERT_DBG(bt_val != NULL);
 	*option = bt_value_integer_unsigned_get(bt_val);
-	
+
 end:
 	return;
 }
 
 static void
-apply_one_string(const char *key, const bt_value *params, char **option,
+apply_one_string(const char *key, const bt_value *params, gchar **option,
     char *default_val)
 {
 	const bt_value *bt_val;
@@ -284,7 +282,7 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 	enum bt_param_validation_status validation_status;
 	gchar *validation_error = NULL;
 	bt_component_class_initialize_method_status status;
-	bt_value *rdkafka_conf;
+	const bt_value *rdkafka_conf;
 	char *buf, *offset;
 	size_t buf_sz;
 	char errstr[256];
@@ -318,10 +316,10 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 	kafka->log_level = log_level;
 	kafka->self_comp = self_comp;
 	apply_one_unsigned_integer(MAX_QUERY_SIZE_PARAM, params,
-	    &kafka->max_query_sz, MAX_QUERY_SIZE);
+	    &kafka->max_query_sz, DEFAULT_MAX_QUERY_SIZE);
 	kafka->has_msg_iter = false;
-	
-	apply_one_string(TOPIC_PARAM, params, &kafka->topic, "");
+
+	apply_one_string(TOPIC_PARAM, params, &kafka->topic_name, "");
 
 	/* Parse the offset param if present */
 	apply_one_string(OFFSET_PARAM, params, &offset, "LATEST");
@@ -332,10 +330,10 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 
 		kafka->offset =  RD_KAFKA_OFFSET_END;
 	}
-	
+
 	rdkafka_conf = bt_value_map_borrow_entry_value_const(params, RDKAFKA_CONF_PARAM);
 	BT_ASSERT_DBG(rdkafka_conf != NULL);
-	
+
 	kafka->conf = rd_kafka_conf_new();
 	if (kafka->conf == NULL) {
 
@@ -343,7 +341,7 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 		goto end;
 	}
 
-	/* Set some default configuration values */	
+	/* Set some default configuration values */
 	if (rd_kafka_conf_set(kafka->conf, "group.id", DEFAULT_GROUP_ID,
 	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
 
@@ -352,7 +350,7 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 		goto error;
 	}
-	
+
 	if (rd_kafka_conf_set(kafka->conf, "auto.offset.reset", "earliest",
 	    errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
 
@@ -381,7 +379,7 @@ kafka_component_create(const bt_value *params, bt_logging_level log_level,
 	if (bt_value_map_foreach_entry_const(rdkafka_conf,
 	    rdkafka_conf_validate_entry, kafka->conf) !=
 	    BT_VALUE_MAP_FOREACH_ENTRY_STATUS_OK) {
-	
+
 		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 		rd_kafka_conf_destroy(kafka->conf);
 		goto end;
@@ -409,7 +407,7 @@ kafka_component_destroy_data(struct kafka_component *self)
 	}
 	BT_ASSERT_DBG(self != NULL);
 
-	g_free(self->topic);
+	g_free(self->topic_name);
 	g_free(self);
 }
 
@@ -427,7 +425,7 @@ kafka_component_init(bt_self_component_source *self_comp_src,
 	/* Validate the method's preconditions */
 	BT_ASSERT(self_comp_src != NULL);
 	BT_ASSERT(params != NULL);
-	
+
 	self_comp = bt_self_component_source_as_self_component
 		(self_comp_src);
 	BT_ASSERT_DBG(self_comp != NULL);
@@ -464,7 +462,7 @@ BT_HIDDEN void
 kafka_component_finalize(bt_self_component_source *component)
 {
 	struct kafka_component *kafka;
-       
+
 	kafka = bt_self_component_get_data(
 	    bt_self_component_source_as_self_component(component));
 	if (kafka == NULL) {
@@ -505,9 +503,9 @@ bt_component_class_query_method_status kafka_query(
 		char *buf;
 		size_t buf_sz;
 
-		buf_sz = snprintf(NULL, 0, "%u", MAX_QUERY_SIZE);
+		buf_sz = snprintf(NULL, 0, "%u", DEFAULT_MAX_QUERY_SIZE);
 		buf = alloca(buf_sz + 1);
-		snprintf(buf, buf_sz + 1, "%u", MAX_QUERY_SIZE);
+		snprintf(buf, buf_sz + 1, "%u", DEFAULT_MAX_QUERY_SIZE);
 
 		*result = bt_value_string_create_init(buf);
 	} else {
@@ -519,56 +517,6 @@ bt_component_class_query_method_status kafka_query(
 
 end:
 	return status;
-}
-
-BT_HIDDEN bool
-kafka_graph_is_canceled(struct kafka_msg_iter *msg_iter)
-{
-	bool ret;
-
-	if (msg_iter == NULL) {
-
-		ret = false;
-		goto end;
-	}
-	BT_ASSERT_DBG(msg_iter != NULL);
-	    
-	BT_ASSERT_DBG(kafka_msg_iter_get_self_msg_iter(msg_iter) != NULL);
-	ret = bt_self_message_iterator_is_interrupted(
-	    kafka_msg_iter_get_self_msg_iter(msg_iter));
-
-end:
-	return ret;
-}
-
-BT_HIDDEN size_t
-kafka_get_max_request_sz(struct kafka_component *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->max_query_sz;
-}
-
-BT_HIDDEN bool
-kafka_component_has_msg_iter(struct kafka_component *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->has_msg_iter;
-}
-
-BT_HIDDEN void
-kafka_component_set_has_msg_iter(struct kafka_component *self, bool has_msg_iter)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	self->has_msg_iter = has_msg_iter;
 }
 
 BT_HIDDEN bt_self_component *
@@ -591,16 +539,6 @@ kafka_component_get_logging_level(struct kafka_component *self)
 	return self->log_level;
 }
 
-BT_HIDDEN GString  *
-kafka_component_get_topic(struct kafka_component *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->topic;
-}
-
 BT_HIDDEN rd_kafka_conf_t *
 kafka_component_get_conf(struct kafka_component *self)
 {
@@ -610,7 +548,17 @@ kafka_component_get_conf(struct kafka_component *self)
 
 	return self->conf;
 }
-	
+
+BT_HIDDEN size_t
+kafka_component_get_max_request_sz(struct kafka_component *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return self->max_query_sz;
+}
+
 BT_HIDDEN int64_t
 kafka_component_get_offset(struct kafka_component *self)
 {
@@ -619,4 +567,34 @@ kafka_component_get_offset(struct kafka_component *self)
 	BT_ASSERT(self != NULL);
 
 	return self->offset;
+}
+
+BT_HIDDEN char *
+kafka_component_get_topic_name(struct kafka_component *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return (char *) self->topic_name;
+}
+
+BT_HIDDEN bool
+kafka_component_has_msg_iter(struct kafka_component *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return self->has_msg_iter;
+}
+
+BT_HIDDEN void
+kafka_component_set_has_msg_iter(struct kafka_component *self, bool has_msg_iter)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	self->has_msg_iter = has_msg_iter;
 }

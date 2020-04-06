@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2019-20 (Graeme Jenkinson)
+ * Copyright (c) 2019-2020 (Graeme Jenkinson)
  * All rights reserved.
  *
  * This software was developed by BAE Systems, the University of Cambridge
@@ -37,7 +37,7 @@
 
 #include <babeltrace2/babeltrace.h>
 
-#include "kafka-src/kafka.h"
+#include "kafka-src/kafka_component.h"
 
 #ifndef BT_BUILT_IN_PLUGINS
 BT_PLUGIN_MODULE();
@@ -51,18 +51,18 @@ BT_PLUGIN_LICENSE("2-Clause BSD");
 
 /* ctf.kafka source */
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_WITH_ID(auto, kafka, "kafka",
-	kafka_msg_iter_next);
+    kafka_msg_iter_next);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_DESCRIPTION_WITH_ID(auto, kafka,
-	"Connect to Kafka topic and receive dtrace streams.");
+    "Connect to Kafka topic and receive dtrace streams.");
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_HELP_WITH_ID(auto, kafka,
-	"See the babeltrace2-source.dtrace.kafka(7) manual page.");
+    "See the babeltrace2-source.dtrace.kafka(7) manual page.");
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_INITIALIZE_METHOD_WITH_ID(auto, kafka,
-	kafka_component_init);
+    kafka_component_init);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_QUERY_METHOD_WITH_ID(auto, kafka,
-	kafka_query);
+    kafka_query);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_FINALIZE_METHOD_WITH_ID(auto, kafka,
-	kafka_component_finalize);
-BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_INITIALIZE_METHOD_WITH_ID(auto,
-	kafka, kafka_msg_iter_init);
-BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_FINALIZE_METHOD_WITH_ID(auto,
-	kafka, kafka_msg_iter_finalize);
+    kafka_component_finalize);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_INITIALIZE_METHOD_WITH_ID(
+    auto, kafka, kafka_msg_iter_init);
+BT_PLUGIN_SOURCE_COMPONENT_CLASS_MESSAGE_ITERATOR_CLASS_FINALIZE_METHOD_WITH_ID(
+    auto, kafka, kafka_msg_iter_finalize);
