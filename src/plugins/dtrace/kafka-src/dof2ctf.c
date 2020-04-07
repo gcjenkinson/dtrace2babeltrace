@@ -31,17 +31,20 @@
  */
 
 #include <stdlib.h>
-#include <babeltrace2/babeltrace.h>
 #include <glib.h>
 
-#include "dof.h"
-#include "dof2ctf.h"
+#include <babeltrace2/babeltrace.h>
 
 #define BT_LOG_TAG "PLUGIN/SRC.DTRACE.KAFKA/CTF-WRITER"
 #include "ctf-writer/logging.h"
 #include "ctf-writer/writer.h"
 #include "ctf-writer/clock.h"
 #include "compat/stdlib.h"
+
+#include "dof.h"
+#include "dof2ctf.h"
+
+extern void bt_ctf_writer_destroy(struct bt_ctf_object *);
 
 /* libbbuf memory allocation and freeing functions. */
 const bbuf_malloc_func bbuf_alloc = malloc;
@@ -52,6 +55,8 @@ static const uint64_t DTRACE_CLOCK_FREQ = 1000000000;
 static char const * const CLOCK_NAME = "dtrace";
 static char const * const STREAM_NAME = "dtrace";
 static char const * const TMP_DIRNAME = "dof2ctf_XXXXXX";
+static char const * const EPID_FIELD_NAME = "id";
+static char const * const TIMESTAMP_FIELD_NAME = "timestamp";
 
 bool
 dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
@@ -59,20 +64,20 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 {
 	struct dof *dof;
 	dof_hdr_t hdr;
-	struct bt_ctf_writer *writer;
-	struct bt_ctf_trace *trace;
-	struct bt_ctf_stream_class *stream_class;
-	struct bt_ctf_stream *stream;
-	struct bt_ctf_field_type *event_header_type;
 	struct bt_ctf_clock *clock;
+	struct bt_ctf_event_class *epidnone_event_class;
+	struct bt_ctf_event *epidnone_event;
+	struct bt_ctf_field_type *event_header_type;
 	struct bt_ctf_field_type *epid_ft = NULL;
 	struct bt_ctf_field_type *timestamp_ft = NULL;
 	struct bt_ctf_field_type *_uint8_t;
 	struct bt_ctf_field_type *_uint16_t;
 	struct bt_ctf_field_type *_uint32_t;
 	struct bt_ctf_field_type *_uint64_t;
-	struct bt_ctf_event_class *epidnone_event_class;
-	struct bt_ctf_event *epidnone_event;
+	struct bt_ctf_stream *stream;
+	struct bt_ctf_stream_class *stream_class;
+	struct bt_ctf_trace *trace;
+	struct bt_ctf_writer *writer;
 	gchar *trace_path;
 	char *metadata_string;
 	uint32_t epid = 0;
@@ -83,13 +88,15 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 
 	/* Create DOF from the received metadata buffer. */
 	rc = dof_new_buf(&dof, buf, len);
+	BT_ASSERT_DBG(ret == 0);
 	if (rc != 0) {
 
-		BT_LOGE_STR("Failed parsing DOF\n");
+		BT_LOGE("Failed parsing DOF\n");
 		return false;
 	}
 
 	rc = dof_load_header(dof, &hdr);
+	BT_ASSERT_DBG(ret == 0);
 	if (rc != 0) {
 
 		BT_LOGE_STR("Failed parsing DOF header\n");
@@ -101,15 +108,16 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	BT_ASSERT(trace_path != NULL);
 	if (!bt_mkdtemp(trace_path)) {
 	
-		BT_LOGE("Failed to create temporary directory for the CTF writer\n");
+		BT_LOGE("Failed to create temporary directory %s "
+		    "for the CTF writer\n", trace_path);
 		goto err_destroy_dof;
 	}
 
 	writer = bt_ctf_writer_create(trace_path);
-	BT_ASSERT(writer != NULL);
+	BT_ASSERT_DBG(writer != NULL);
 	if (writer == NULL) {
 
-		BT_LOGE("Failed to create CTF writer\n");
+		BT_LOGE_STR("Failed to create CTF writer\n");
 		g_free(trace_path);
 		goto err_destroy_dof;
 	}
@@ -124,15 +132,17 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 
 	/* Set the trace endianness based on DOF. */
 	trace = bt_ctf_writer_get_trace(writer);
-	BT_ASSERT(trace != NULL);
+	BT_ASSERT_DBG(trace != NULL);
 	if (hdr.dofh_ident[DOF_ID_ENCODING] == DOF_ENCODE_MSB) {
 
-		BT_LOGD("Trace byte order: big-endian\n");
-		bt_ctf_trace_set_native_byte_order(trace, BT_CTF_BYTE_ORDER_BIG_ENDIAN);
+		BT_LOGD_STR("Trace byte order: big-endian\n");
+		bt_ctf_trace_set_native_byte_order(trace,
+		    BT_CTF_BYTE_ORDER_BIG_ENDIAN);
 	} else {
 
-		BT_LOGD("Trace byte order: little-endian\n");
-		bt_ctf_trace_set_native_byte_order(trace, BT_CTF_BYTE_ORDER_LITTLE_ENDIAN);
+		BT_LOGD_STR("Trace byte order: little-endian\n");
+		bt_ctf_trace_set_native_byte_order(trace,
+		    BT_CTF_BYTE_ORDER_LITTLE_ENDIAN);
 	}
 
 	/* Create a CTF clock.
@@ -141,38 +151,47 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	 * interpretation * of the timestamp field - as cycles since reset).
 	 */
 	clock = bt_ctf_clock_create(CLOCK_NAME);
-	BT_ASSERT(clock != NULL);
+	BT_ASSERT_DBG(clock != NULL);
 	if (clock == NULL) {
 
-		BT_LOGE("Failed to create CTF clock\n");
+		BT_LOGE_STR("Failed to create CTF clock\n");
 		goto err_put_ref_writer;
 	}
 
 	ret = bt_ctf_clock_set_frequency(clock, DTRACE_CLOCK_FREQ);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 		
-		BT_LOGE("Failed to set CTF clock frequency\n");
-		goto err_put_ref_clock;
+		BT_LOGE("Failed to set CTF clock frequency: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(clock);
+		goto err_put_ref_writer;
 	}
 
 	ret = bt_ctf_writer_add_clock(writer, clock);
+	BT_ASSERT_DBG(ret == 0);
+	if (ret != 0) {
+		
+		BT_LOGE("Failed adding CTF clock: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(clock);
+		goto err_put_ref_writer;
+	}
 
 	/* Create a single CTF event stream */
 	stream_class = bt_ctf_stream_class_create(STREAM_NAME);
-	BT_ASSERT(stream_class != NULL);
+	BT_ASSERT_DBG(stream_class != NULL);
 	if (stream_class == NULL) {
 
-		BT_LOGE("Failed to create CTF stream class\n");
-		goto err_put_ref_clock;
+		BT_LOGE_STR("Failed to create CTF stream class\n");
+		goto err_put_ref_writer;
 	}
 
 	stream = bt_ctf_writer_create_stream(writer, stream_class);
-	BT_ASSERT(stream != NULL);
+	BT_ASSERT_DBG(stream != NULL);
 	if (stream == NULL) {
 
-		BT_LOGE("Failed to create CTF stream\n");
-		//bt_ctf_object_put_ref(stream_class);
-		goto err_put_ref_clock;
+		BT_LOGE_STR("Failed to create CTF stream\n");
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(stream_class);
+		goto err_put_ref_writer;
 	}
 
 	/* Create the event header.
@@ -182,86 +201,127 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	 * and TS is a 64bit timestamp.
 	 */
 	event_header_type = bt_ctf_field_type_structure_create();
-	BT_ASSERT(event_header_type != NULL);
+	BT_ASSERT_DBG(event_header_type != NULL);
 	if (event_header_type == NULL) {
 
-		BT_LOGE("Failed to create CTF event header\n");
+		BT_LOGE("Failed to create CTF event header: %d\n", ret);
 		goto err_put_ref_stream;
 	}
 
 	epid_ft = bt_ctf_field_type_integer_create(sizeof(uint32_t) * CHAR_BIT);
-	BT_ASSERT(epid_ft != NULL);
+	BT_ASSERT_DBG(epid_ft != NULL);
+	if (epid_ft == NULL) {
+
+		BT_LOGE("Failed creating event header `epid` field: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
+	}
 
 	ret = bt_ctf_field_type_set_alignment(epid_ft, sizeof(uint32_t) * CHAR_BIT);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE("Cannot add `id` field to event header field type.");
-		//goto end;
+		BT_LOGE("Failed setting event header `epid` field alignement: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(epid_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
 
 	ret = bt_ctf_field_type_set_byte_order(epid_ft,
 	    hdr.dofh_ident[DOF_ID_ENCODING] == DOF_ENCODE_MSB ?
 	    BT_CTF_BYTE_ORDER_BIG_ENDIAN : BT_CTF_BYTE_ORDER_LITTLE_ENDIAN);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		BT_LOGE("Error setting epid byte order\n");
-		//goto end;
+		BT_LOGE("Error setting event header `epid` field byte order: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(epid_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
 
 	ret = bt_ctf_field_type_structure_add_field(event_header_type,
-		epid_ft, "id");
+	    epid_ft, EPID_FIELD_NAME);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE("Cannot add `id` field to event header field type.");
-		//goto end;
+		BT_LOGE("Cannot add `epid` field to event header: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(epid_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
-	//bt_ctf_object_put_ref(epid_ft);
 
 	timestamp_ft = bt_ctf_field_type_integer_create(sizeof(uint64_t) * CHAR_BIT);
-	BT_ASSERT(timestamp_ft != NULL);
+	BT_ASSERT_DBG(timestamp_ft != NULL);
+	if (timestamp_ft == NULL) {
+
+		BT_LOGE("Failed creating event header `timestamp` field: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
+	}
 
 	ret = bt_ctf_field_type_set_alignment(timestamp_ft, sizeof(uint64_t) * CHAR_BIT);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE("Cannot add `id` field to event header field type.");
-		//goto end;
+		BT_LOGE("Error setting event header `timestamp` field alignment: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(timestamp_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
 
 	ret = bt_ctf_field_type_set_byte_order(timestamp_ft,
 	    hdr.dofh_ident[DOF_ID_ENCODING] == DOF_ENCODE_MSB ?
 	    BT_CTF_BYTE_ORDER_BIG_ENDIAN : BT_CTF_BYTE_ORDER_LITTLE_ENDIAN);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE("Cannot add `id` field to event header field type.");
-		//goto end;
+		BT_LOGE("Error setting event header `timestamp` field "
+		    "byte order: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(timestamp_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
 
-	ret = bt_ctf_field_type_integer_set_mapped_clock_class(timestamp_ft, clock->clock_class);
+	ret = bt_ctf_field_type_integer_set_mapped_clock_class(timestamp_ft,
+	    clock->clock_class);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		BT_LOGE("Error setting timestamp byte order\n");
-		//BT_LOGE_STR("Cannot add `timestamp` field to event header field type.");
-		//goto end;
+		BT_LOGE("Error setting `timestamp` field byte order\n");
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(timestamp_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
 
 	ret = bt_ctf_field_type_structure_add_field(event_header_type,
-		timestamp_ft, "timestamp");
+	    timestamp_ft, TIMESTAMP_FIELD_NAME);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE_STR("Cannot add `timestamp` field to event header field type.");
-		//goto end;
+		BT_LOGE("Cannot add `timestamp` field to event header\n");
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(timestamp_ft);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
-	//bt_ctf_object_put_ref(timestamp_ft);
 	
-	ret = bt_ctf_field_type_set_alignment(event_header_type, sizeof(uint64_t) * CHAR_BIT);
+	ret = bt_ctf_field_type_set_alignment(event_header_type,
+	    sizeof(uint64_t) * CHAR_BIT);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE_STR("Cannot add `timestamp` field to event header field type.");
-		//goto end;
+		BT_LOGE("Cannot set alignment of event header field type: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
 	}
 
-	bt_ctf_stream_add_event_header(stream_class, event_header_type);
-	
+	ret = bt_ctf_stream_add_event_header(stream_class, event_header_type);
+	if (ret != 0) {
+
+		BT_LOGE("Cannot add event header to stream: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(event_header_type);
+		goto err_put_ref_stream;
+	}
+
 	/* Create EPINONE (id = 0) event class.
 	 * The trace buffer from dtrace is padded with zeroes, this event
 	 * matches those ids preventing babletrace reporting an
@@ -271,33 +331,45 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	BT_ASSERT(epidnone_event_class != NULL);
 	if (epidnone_event_class == NULL) {
 
-		//BT_LOGE_STR("Cannot add `timestamp` field to event header field type.");
-		//goto end;
+		BT_LOGE_STR("Cannot create `EPIDNONE` class\n");
+		goto err_put_ref_stream;
 	}
 
 	ret = bt_ctf_event_class_set_id(epidnone_event_class, epid++);
+	BT_ASSERT_DBG(ret == 0);
 	if (ret != 0) {
 
-		//BT_LOGE_STR("Cannot add `timestamp` field to event header field type.");
-		//goto end;
+		BT_LOGE("Cannot set id (%u) of `epidnone` event: %d\n", epid, ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(epidnone_event_class);
+		goto err_put_ref_stream;
 	}
 	
-	bt_ctf_stream_class_add_event_class(stream_class, epidnone_event_class);
-	//bt_ctf_object_put_ref(epidnone_event_class);
+	ret = bt_ctf_stream_class_add_event_class(stream_class, epidnone_event_class);
+	BT_ASSERT_DBG(ret == 0);
+	if (ret != 0) {
 
+		BT_LOGE("Cannot add `epidnone` event class to stream class: %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(epidnone_event_class);
+		goto err_put_ref_stream;
+	}
+	
 	epidnone_event = bt_ctf_event_create(epidnone_event_class);
 	BT_ASSERT(epidnone_event_class != NULL);
 	if (epidnone_event == NULL) {
 
-		//BT_LOGE_STR("Cannot add `timestamp` field to event header field type.");
-		//bt_ctf_object_put_ref(epidnone_event_class);
-		//goto end;
+		BT_LOGE_STR("Cannot create `epidnone` event\n");
+		goto err_put_ref_stream;
 	}
-	//bt_ctf_object_put_ref(epidnone_event_class);
 
 	/* Add the EPIDNONE event to the stream. */
-	bt_ctf_stream_append_event(stream, epidnone_event);
-	//bt_ctf_object_put_ref(epidnone_event);
+	ret = bt_ctf_stream_append_event(stream, epidnone_event);
+	BT_ASSERT_DBG(ret == 0);
+	if (ret != 0) {
+
+		BT_LOGE("Cannot add `epidnone` event to stream : %d\n", ret);
+		BT_CTF_OBJECT_PUT_REF_AND_RESET(epidnone_event);
+		goto err_put_ref_stream;
+	}
 
 	/* Iterate across all of the sections in the DOF file.
 	 * Any error in parsing the DOF result in failure to provide the CTF metadata.
@@ -310,10 +382,11 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 
 		/* Load the section, processing each of the ECDDESCs. */
 		rc = dof_load_sect(dof, &hdr, sec_num, &sec);
+		BT_ASSERT_DBG(rc == 0);
 		if (rc != 0) {
 
 			BT_LOGE("Failure loading DOF section: %u\n", sec_num);
-			goto err_put_ref_writer;
+			goto err_put_ref_stream;
 		}
 
 		if (sec.dofs_type == DOF_SECT_ECBDESC) { 
@@ -327,42 +400,47 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 				
 			/* Load the ECBDESC section data */
 			rc = dof_load_ecbdesc(dof, &hdr, &sec, &ecbdesc);
+			BT_ASSERT_DBG(rc == 0);
 			if (rc != 0) {
 				
 				BT_LOGE_STR("Error parsing ecbdesc (DOF malformed)\n");
-				goto err_put_ref_writer;
+				goto err_put_ref_stream;
 			}
 
 			/* Load the PROBEDESC section header specified in the ECBDESC. */
 			rc = dof_load_sect(dof, &hdr, ecbdesc.dofe_probes + 1, &psec);
+			BT_ASSERT_DBG(rc == 0);
 			if (rc != 0) {
 
 				BT_LOGE_STR("Error parsing probedesc (DOF malformed)\n");
-				goto err_put_ref_writer;
+				goto err_put_ref_stream;
 			}
 
 			/* Load the PROBEDESC section data. */
 			rc = dof_load_probedesc(dof, &hdr, &psec, &pdesc);
+			BT_ASSERT_DBG(rc == 0);
 			if (rc != 0) {
 				
 				BT_LOGE_STR("Error parsing probedesc (DOF malformed)\n");
-				goto err_put_ref_writer;
+				goto err_put_ref_stream;
 			}
 
 			/* Load the STRTAB section header. */
 			rc = dof_load_sect(dof, &hdr, pdesc.dofp_strtab + 1, &sec);
+			BT_ASSERT_DBG(rc == 0);
 			if (rc != 0) {
 
 				BT_LOGE_STR("Error parsing strtab (DOF malformed)\n");
-				goto err_put_ref_writer;
+				goto err_put_ref_stream;
 			}
 
 			/* Load the PROBEDESC STRTAB section. */
 			rc = dof_load_sect_hex(dof, &sec, &strtab_buf);
+			BT_ASSERT_DBG(rc == 0);
 			if (rc != 0) {
 				
 				BT_LOGE_STR("Error parsing probedec strtab (DOF malformed)\n");
-				goto err_put_ref_writer;
+				goto err_put_ref_stream;
 			}
 
 			/* Reconstruct the probe 4-tuple as the CTF event name */
@@ -390,7 +468,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 			if (event_class == NULL) {
 
 				BT_LOGE("Error creating event class %s\n", probe_name);
-				goto err_put_ref_writer;
+				goto err_put_ref_stream;
 			}
 
 			/* Load the section header. */
@@ -406,18 +484,22 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 				/* Load the section header. */
 				rc = dof_load_sect(dof, &hdr,
 				    ecbdesc.dofe_actions + 1, &actsec);
+				BT_ASSERT_DBG(rc == 0);
 				if (rc != 0) {
 
 					BT_LOGE_STR(
 					    "Error parsing section header (DOF malformed)\n");
-					goto err_put_ref_writer;
+					BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
+					goto err_put_ref_stream;
 				}
 
 				rc = dof_load_sect_hex(dof, &actsec, &actdesc_buf);
+				BT_ASSERT_DBG(rc == 0);
 				if (rc != 0) {
 					
 					BT_LOGE_STR("Error parsing actdesc (DOF malformed)\n");
-					goto err_put_ref_writer;
+					BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
+					goto err_put_ref_stream;
 				}
 
 				/* Iterate the ACTDESCs */
@@ -434,19 +516,24 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 					/* Load the section header. */
 					rc = dof_load_sect(dof, &hdr,
 					    actdesc->dofa_difo + 1, &sec);
+					BT_ASSERT_DBG(rc == 0);
 					if (rc != 0) {
 
 						BT_LOGE_STR(
-						    "Error parsing section header (DOF malformed)\n");
+						    "Error parsing section header "
+						    "(DOF malformed)\n");
+						BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
 						goto err_put_ref_stream;
 					}
 
 					/* Load the DIFOHDR section. */
 					rc = dof_load_difohdr(dof, &hdr, &sec, &difo);
+					BT_ASSERT_DBG(rc == 0);
 					if (rc != 0) {
 						
 						BT_LOGE_STR(
 						    "Error parsing difohdr (DOF malformed)\n");
+						BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
 						goto err_put_ref_stream;
 					}
 			
@@ -456,6 +543,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 					if (sbuf_error(rec_name) != 0) {
 
 						BT_LOGE_STR("Error creating record name\n");
+						BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
 						goto err_put_ref_stream;
 					}
 
@@ -514,13 +602,27 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 						break;
 					}
 
+					/* Free the difohdr memory allocated for the
+					 * strtab and buf sections.
+					 */
+					if (difo.dtdo_buf != NULL) {
+					
+						free(difo.dtdo_buf);
+					}
+
+					if (difo.dtdo_strtab != NULL) {
+					
+						free(difo.dtdo_buf);
+					}
+
+					BT_ASSERT_DBG(ret == 0);
 					if (ret != 0) {
 
 						BT_LOGE(
 						    "Error adding field (%u bytes) to event\n",
 						    difo.dtdo_rtype.dtdt_size);
+						BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
 						goto err_put_ref_stream;
-
 					}
 
 					actdesc++;
@@ -534,6 +636,13 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 				 * that is monotonically increasing.
 				 */
 				ret = bt_ctf_event_class_set_id(event_class, epid++);
+				BT_ASSERT_DBG(ret == 0);
+				if (ret != 0) {
+
+					BT_LOGE("Error setting event class id\n");
+					BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
+					goto err_put_ref_stream;
+				}
 
 				/* Add the event_class and event to the stream
 				 * (releasing their references)
@@ -545,14 +654,19 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 				BT_ASSERT_DBG(event != NULL);
 				if (event == NULL) {
 
-					BT_LOGE("Error creating event");
-					bt_ctf_object_put_ref(event_class);
+					BT_LOGE("Error creating event\n");
+					BT_CTF_OBJECT_PUT_REF_AND_RESET(event_class);
 					goto err_put_ref_stream;
 				}
-				bt_ctf_stream_append_event(stream, event);
+				
+				ret = bt_ctf_stream_append_event(stream, event);
+				BT_ASSERT_DBG(ret == 0);
+				if (ret != 0) {
 
-				bt_ctf_object_put_ref(event_class);
-				bt_ctf_object_put_ref(event);
+					BT_LOGE("Error adding event to stream: %d\n", ret);
+					BT_CTF_OBJECT_PUT_REF_AND_RESET(event);
+					goto err_put_ref_stream;
+				}
 			}
 		}
 	}
@@ -567,21 +681,16 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	bt_ctf_writer_flush_metadata(writer);
 
 	/* Release references to the remaining BT objects. */
-	bt_ctf_object_put_ref(stream);
-	bt_ctf_object_put_ref(stream_class);
-	bt_ctf_object_put_ref(trace);
+	BT_CTF_OBJECT_PUT_REF_AND_RESET(stream);
 	BT_CTF_OBJECT_PUT_REF_AND_RESET(writer);
 
 	/* Destroy the DOF object */
 	dof_destroy(dof);
 
 	return true;
-
+			
 err_put_ref_stream:
-	bt_ctf_object_put_ref(stream);
-
-err_put_ref_clock:
-	BT_CTF_OBJECT_PUT_REF_AND_RESET(clock);
+	BT_CTF_OBJECT_PUT_REF_AND_RESET(stream);
 
 err_put_ref_writer:
 	BT_CTF_OBJECT_PUT_REF_AND_RESET(writer);
