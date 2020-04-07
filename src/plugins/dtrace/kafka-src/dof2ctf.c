@@ -155,7 +155,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	if (clock == NULL) {
 
 		BT_LOGE_STR("Failed to create CTF clock\n");
-		goto err_put_ref_writer;
+		goto err_put_ref_trace;
 	}
 
 	ret = bt_ctf_clock_set_frequency(clock, DTRACE_CLOCK_FREQ);
@@ -164,7 +164,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 		
 		BT_LOGE("Failed to set CTF clock frequency: %d\n", ret);
 		BT_CTF_OBJECT_PUT_REF_AND_RESET(clock);
-		goto err_put_ref_writer;
+		goto err_put_ref_trace;
 	}
 
 	ret = bt_ctf_writer_add_clock(writer, clock);
@@ -173,7 +173,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 		
 		BT_LOGE("Failed adding CTF clock: %d\n", ret);
 		BT_CTF_OBJECT_PUT_REF_AND_RESET(clock);
-		goto err_put_ref_writer;
+		goto err_put_ref_trace;
 	}
 
 	/* Create a single CTF event stream */
@@ -182,7 +182,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	if (stream_class == NULL) {
 
 		BT_LOGE_STR("Failed to create CTF stream class\n");
-		goto err_put_ref_writer;
+		goto err_put_ref_trace;
 	}
 
 	stream = bt_ctf_writer_create_stream(writer, stream_class);
@@ -191,7 +191,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 
 		BT_LOGE_STR("Failed to create CTF stream\n");
 		BT_CTF_OBJECT_PUT_REF_AND_RESET(stream_class);
-		goto err_put_ref_writer;
+		goto err_put_ref_stream;
 	}
 
 	/* Create the event header.
@@ -681,8 +681,9 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 	bt_ctf_writer_flush_metadata(writer);
 
 	/* Release references to the remaining BT objects. */
-	BT_CTF_OBJECT_PUT_REF_AND_RESET(stream);
 	BT_CTF_OBJECT_PUT_REF_AND_RESET(writer);
+	BT_CTF_OBJECT_PUT_REF_AND_RESET(stream);
+	BT_CTF_OBJECT_PUT_REF_AND_RESET(trace);
 
 	/* Destroy the DOF object */
 	dof_destroy(dof);
@@ -691,6 +692,9 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 			
 err_put_ref_stream:
 	BT_CTF_OBJECT_PUT_REF_AND_RESET(stream);
+
+err_put_ref_trace:
+	BT_CTF_OBJECT_PUT_REF_AND_RESET(trace);
 
 err_put_ref_writer:
 	BT_CTF_OBJECT_PUT_REF_AND_RESET(writer);
