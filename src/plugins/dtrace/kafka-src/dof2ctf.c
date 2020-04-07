@@ -612,7 +612,7 @@ dof2ctf(char *buf, size_t len, FILE *fp, bt_logging_level log_level,
 
 					if (difo.dtdo_strtab != NULL) {
 					
-						free(difo.dtdo_buf);
+						free(difo.dtdo_strtab);
 					}
 
 					BT_ASSERT_DBG(ret == 0);
