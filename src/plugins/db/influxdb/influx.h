@@ -47,13 +47,13 @@ extern "C" {
 #include "common/macros.h"
 #include <babeltrace2/babeltrace.h>
 
-BT_HIDDEN bt_component_class_initialize_method_status influxdb_init(
+extern bt_component_class_initialize_method_status influxdb_init(
     bt_self_component_sink *, bt_self_component_sink_configuration *,
     const bt_value *, void *);
-BT_HIDDEN void influxdb_finalize(bt_self_component_sink *component);
-BT_HIDDEN bt_component_class_sink_consume_method_status influxdb_consume(
+extern void influxdb_finalize(bt_self_component_sink *component);
+extern bt_component_class_sink_consume_method_status influxdb_consume(
     bt_self_component_sink *);
-BT_HIDDEN bt_component_class_sink_graph_is_configured_method_status
+extern bt_component_class_sink_graph_is_configured_method_status
     influxdb_graph_is_configured(bt_self_component_sink *);
 
 #ifdef __cplus_plus 
