@@ -51,8 +51,8 @@ BT_PLUGIN_SINK_COMPONENT_CLASS(influxdb, influxdb_consume);
 BT_PLUGIN_SINK_COMPONENT_CLASS_INITIALIZE_METHOD(influxdb, influxdb_init);
 BT_PLUGIN_SINK_COMPONENT_CLASS_FINALIZE_METHOD(influxdb, influxdb_finalize);
 BT_PLUGIN_SINK_COMPONENT_CLASS_GRAPH_IS_CONFIGURED_METHOD(influxdb,
-	influxdb_graph_is_configured);
+    influxdb_graph_is_configured);
 BT_PLUGIN_SINK_COMPONENT_CLASS_DESCRIPTION(influxdb,
-	"Output trace as timestamped ifluxdb MEASUREMENTS.");
+    "Output trace as timestamped influxdb MEASUREMENTS.");
 BT_PLUGIN_SINK_COMPONENT_CLASS_HELP(influxdb,
-	"See the babeltrace2-sink.db.influxdb(7) manual page.");
+    "See the babeltrace2-sink.db.influxdb(7) manual page.");
