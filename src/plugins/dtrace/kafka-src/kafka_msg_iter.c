@@ -41,7 +41,9 @@
 #define BT_LOG_TAG "PLUGIN/SRC.DTRACE.KAFKA/MSG-ITER"
 #include "logging/comp-logging.h"
 
+#include "kafka_component.h"
 #include "kafka_metadata.h"
+#include "kafka_msg_iter.h"
 #include "kafka_stream_iter.h"
 #include "kafka_trace.h"
 
@@ -227,27 +229,27 @@ kafka_msg_iter_init(bt_self_message_iterator *self_msg_it,
 	}
 
 	if (rd_kafka_topic_partition_list_add(subscription,
-	    kafka_component_get_topic(kafka),
+	    kafka_component_get_topic_name(kafka),
 	    RD_KAFKA_PARTITION_UA) == NULL) {
 
 		BT_COMP_LOGE("Failed adding Kafka topic/partition (%s) offset\n",
-		    kafka_component_get_topic(kafka));
+		    kafka_component_get_topic_name(kafka));
 		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 		goto error;
 	}
 
 	if (rd_kafka_topic_partition_list_set_offset(subscription,
-	    kafka_component_get_topic(kafka), RD_KAFKA_PARTITION_UA,
+	    kafka_component_get_topic_name(kafka), RD_KAFKA_PARTITION_UA,
 	    kafka_component_get_offset(kafka)) !=RD_KAFKA_RESP_ERR_NO_ERROR) {
 
 
 		BT_COMP_LOGE("Failed setting Kafka topic/partition (%s) offset\n",
-		    kafka_component_get_topic(kafka));
+		    kafka_component_get_topic_name(kafka));
 		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 		goto error;
 	}
 
-	if (rd_kafka_subscribe(kafka_msg_iter_get_consumer(kafka_msg_iter),
+	if (rd_kafka_subscribe(kafka_msg_iter->consumer,
 	    subscription) !=RD_KAFKA_RESP_ERR_NO_ERROR) {
 
 		BT_COMP_LOGE("Failed subscribing Kafka consumer poll\n");
@@ -257,18 +259,8 @@ kafka_msg_iter_init(bt_self_message_iterator *self_msg_it,
 
 	rd_kafka_topic_partition_list_destroy(subscription);
 	
-	rc = kafka_metadata_create(&kafka_msg_iter->metadata, log_level,
-	    self_comp);
-	if (rc != 0) {
-
-		BT_COMP_LOGE("Failed creating Kafka metadata\n");
-		ret = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
-		goto error;
-	}
-
 	kafka_msg_iter->trace = kafka_create_trace(kafka_msg_iter,
-	    kafka_msg_iter->log_level, kafka_msg_iter->self_comp,
-	    kafka_msg_iter->metadata, 0);
+	    kafka_msg_iter->log_level, kafka_msg_iter->self_comp, 0);
 	if (kafka_msg_iter->trace == NULL) {
 
 		BT_COMP_LOGE("Failed creating Kafka trace\n");
@@ -276,7 +268,7 @@ kafka_msg_iter_init(bt_self_message_iterator *self_msg_it,
 		goto error;
 	}
 
-	kafka_trace_set_metadata(kafka_msg_iter->trace, kafka_msg_iter->metadata);
+	//kafka_trace_set_metadata(kafka_msg_iter->trace, kafka_msg_iter->metadata);
 
 	bt_self_message_iterator_set_data(self_msg_it, kafka_msg_iter);
 
@@ -403,4 +395,24 @@ kafka_msg_iter_set_was_interrupted(struct kafka_msg_iter *self)
 
 	BT_ASSERT(self != NULL);
 	self->was_interrupted = true;
+}
+
+BT_HIDDEN bool
+kafka_graph_is_canceled(struct kafka_msg_iter *msg_iter)
+{
+	bool ret;
+
+	if (msg_iter == NULL) {
+
+		ret = false;
+		goto end;
+	}
+	BT_ASSERT_DBG(msg_iter != NULL);
+
+	BT_ASSERT_DBG(kafka_msg_iter_get_self_msg_iter(msg_iter) != NULL);
+	ret = bt_self_message_iterator_is_interrupted(
+	    kafka_msg_iter_get_self_msg_iter(msg_iter));
+
+end:
+	return ret;
 }

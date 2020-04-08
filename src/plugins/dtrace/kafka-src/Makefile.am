@@ -3,8 +3,8 @@ SUBDIRS = ctf-writer
 libbabeltrace2_plugin_dtrace_kafka_la_SOURCES = \
 		bbuf.c \
 		bbuf.h \
-		kafka.c \
-		kafka.h \
+		kafka_component.c \
+		kafka_component.h \
 		kafka_metadata.c \
 		kafka_metadata.h \
 		kafka_msg_iter.c \

@@ -34,38 +34,37 @@
  *
  */
 
-#ifndef BABELTRACE_PLUGIN_CTF_KAFKA_TRACE_H
-#define BABELTRACE_PLUGIN_CTF_KAFKA_TRACE_H
+#ifndef BABELTRACE_PLUGIN_DTRACE_KAFKA_TRACE_H
+#define BABELTRACE_PLUGIN_DTRACE_KAFKA_TRACE_H
 
 #include <stdbool.h>
 
+/* Forward declarations */
+struct kafka_trace;
 struct kafka_msg_iter;
 struct kafka_stream_iter;
-struct kafka_trace;
 struct kafka_metadata;
 
 typedef void (* kafka_trace_callback)(struct kafka_stream_iter *, void *);
 
 extern struct kafka_trace *kafka_create_trace(struct kafka_msg_iter*,
-    bt_logging_level, bt_self_component *, struct kafka_metadata *, uint64_t);
+    bt_logging_level, bt_self_component *, uint64_t);
+
+extern struct bt_trace * kafka_trace_get_bt_trace(struct kafka_trace *);
+extern bt_trace_class * kafka_trace_get_bt_trace_class(struct kafka_trace *);
+extern struct kafka_stream_iter * kafka_trace_get_kafka_stream_iter(struct kafka_trace *);
+extern struct kafka_metadata * kafka_trace_get_kafka_metadata(struct kafka_trace *);
+extern struct kafka_msg_iter * kafka_trace_get_kafka_msg_iter(struct kafka_trace *);
 
 extern void kafka_trace_set_metadata(struct kafka_trace *, struct kafka_metadata *);
-extern struct kafka_stream_iter * kafka_trace_get_kafka_stream_iter(struct kafka_trace *);
-extern bool kafka_trace_is_new_metadata_needed(struct kafka_trace *);
 extern void kafka_trace_set_new_metadata_needed(struct kafka_trace *, bool);
 extern void kafka_trace_set_bt_trace(struct kafka_trace *, bt_trace *);
-extern bt_trace_class * kafka_trace_get_bt_trace_class(struct kafka_trace *);
 extern void kafka_trace_set_bt_trace_class(struct kafka_trace *, bt_trace_class *);
 extern void kafka_trace_set_bt_clock_class(struct kafka_trace *, const bt_clock_class *);
-extern struct kafka_metadata * kafka_trace_get_metadata(struct kafka_trace *);
-extern struct kafka_msg_iter * kafka_trace_get_kafka_msg_iter(struct kafka_trace *);
-extern struct kafka_topic * kafka_trace_get_kafka_topic(struct kafka_trace *);
-extern struct bt_trace * kafka_trace_get_bt_trace(struct kafka_trace *);
-extern struct kafka_metadata * kafka_trace_get_kafka_metadata(struct kafka_trace *);
-extern bt_logging_level kafka_trace_get_logging_level(struct kafka_trace *);
-extern bt_self_component * kafka_trace_get_self_comp(struct kafka_trace *);
+
+extern bool kafka_trace_is_new_metadata_needed(struct kafka_trace *);
 
 extern void kafka_trace_foreach_stream_iter(struct kafka_trace *,
     kafka_trace_callback, void *);
 
-#endif
+#endif /* BABELTRACE_PLUGIN_DTRACE_KAFKA_TRACE_H */

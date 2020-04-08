@@ -39,4 +39,4 @@
 extern bool dof2ctf(char *, size_t, FILE *, bt_logging_level,
     bt_self_component *);
 
-#endif
+#endif /* _DOF2CTF_H */

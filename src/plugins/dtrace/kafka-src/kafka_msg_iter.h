@@ -34,12 +34,17 @@
  *
  */
 
-#ifndef BABELTRACE_PLUGIN_CTF_KAFKA_MSG_ITER_H
-#define BABELTRACE_PLUGIN_CTF_KAFKA_MSG_ITER_H
+#ifndef BABELTRACE_PLUGIN_DTRACE_KAFKA_MSG_ITER_H
+#define BABELTRACE_PLUGIN_DTRACE_KAFKA_MSG_ITER_H
 
+#include <stdbool.h>
+
+#include <babeltrace2/babeltrace.h>
 #include <librdkafka/rdkafka.h>
 
-struct kafka_component;
+#include "kafka_component.h"
+
+/* Forward declaration */
 struct kafka_msg_iter;
 
 enum kafka_iterator_status {
@@ -47,7 +52,7 @@ enum kafka_iterator_status {
 	KAFKA_ITERATOR_STATUS_CONTINUE = 3,
 	/** No message available for now. Try again later. */
 	KAFKA_ITERATOR_STATUS_AGAIN = 2,
-	/** No more CTF_KAFKAS to be delivered. */
+	/** No more CTF_KAFKA records to be delivered. */
 	KAFKA_ITERATOR_STATUS_END = 1,
 	/** No error, okay. */
 	KAFKA_ITERATOR_STATUS_OK = 0,
@@ -75,4 +80,6 @@ extern bt_self_message_iterator * kafka_msg_iter_get_self_msg_iter(
     struct kafka_msg_iter *);
 extern void kafka_msg_iter_set_was_interrupted(struct kafka_msg_iter *);
 
-#endif
+extern bool kafka_graph_is_canceled(struct kafka_msg_iter *);
+
+#endif /* BABELTRACE_PLUGIN_DTRACE_KAFKA_MSG_ITER_H */

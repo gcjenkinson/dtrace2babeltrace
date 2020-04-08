@@ -34,17 +34,19 @@
  *
  */
 
-#ifndef kAFKA_DATA_STREAM_H
-#define KAFKA_DATA_STREAM_H
+#ifndef BABELTRACE_PLUGIN_DTRACE_KAFKA_STREAM_ITER_H
+#define BABELTRACE_PLUGIN_DTRACE_KAFKA_STREAM_ITER_H
 
 #include <stdio.h>
 #include <glib.h>
-#include "common/macros.h"
 #include <babeltrace2/babeltrace.h>
 
-#include "kafka_trace.h"
+#include "common/macros.h"
 #include "common/msg-iter/msg-iter.h"
 
+#include "kafka_trace.h"
+
+/* Forward declaration */
 struct kafka_steam_iter;
 
 enum kafka_stream_state {
@@ -67,7 +69,8 @@ enum kafka_stream_state {
 };
 
 extern struct kafka_stream_iter *kafka_stream_iter_create(
-    struct kafka_trace *, uint64_t, bt_self_message_iterator *);
+    bt_logging_level, bt_self_component *, struct kafka_trace *,
+    uint64_t, bt_self_message_iterator *);
 extern void kafka_stream_iter_destroy(struct kafka_stream_iter *);
 
 extern enum kafka_iterator_status kafka_lazy_msg_init(struct kafka_trace *,
@@ -76,4 +79,4 @@ extern enum kafka_iterator_status kafka_lazy_msg_init(struct kafka_trace *,
 extern struct ctf_msg_iter * kafka_stream_iter_get_ctf_msg_iter(
     struct kafka_stream_iter *);
 
-#endif
+#endif /* BABELTRACE_PLUGIN_DTRACE_KAFKA_STREAM_ITER_H */

@@ -59,7 +59,7 @@
 struct kafka_metadata {
 	bt_logging_level log_level;
 	bt_self_component *self_comp;
-	struct kafka_trace *trace; /* Weak reference */
+    	struct kafka_msg_iter *msg_iter; /* Weak reference */
 	struct ctf_metadata_decoder *decoder; /* Weak reference */
 };
 
@@ -162,12 +162,12 @@ kafka_metadata_update(struct kafka_trace *trace)
 	bt_self_component *self_comp;
 	rd_kafka_message_t *rkmessage;
 	int poll_period_ms = 1000; /* 1000ms */
-	
-	log_level = kafka_trace_get_logging_level(trace);
-	self_comp = kafka_trace_get_self_comp(trace);
 
 	metadata = kafka_trace_get_kafka_metadata(trace);
 	BT_ASSERT_DBG(metadata != NULL);
+
+	log_level = metadata->log_level;
+	self_comp = metadata->self_comp;
 
 	/* Check whether the trace metadata has already been processed.
 	 */
@@ -181,17 +181,15 @@ kafka_metadata_update(struct kafka_trace *trace)
 	BT_COMP_LOGD("Polling Kafka for metadata (%dms)\n", poll_period_ms);
 
 	rkmessage = rd_kafka_consumer_poll(
-	    kafka_msg_iter_get_consumer(kafka_trace_get_kafka_msg_iter(trace)),
-	    poll_period_ms);
+	    kafka_msg_iter_get_consumer(metadata->msg_iter), poll_period_ms);
 	if (rkmessage == NULL) {
 
 		/* Poll timed out */
 		BT_COMP_LOGD("Kafka poll timed out: %d ms\n", poll_period_ms);
-		if (kafka_graph_is_canceled(
-	    	    kafka_trace_get_kafka_msg_iter(trace))) {
+		if (kafka_graph_is_canceled(metadata->msg_iter)) {
 
 			kafka_msg_iter_set_was_interrupted(
-			    kafka_trace_get_kafka_msg_iter(trace));
+			    metadata->msg_iter);
 		}
 		return KAFKA_ITERATOR_STATUS_AGAIN;
 	}
@@ -208,8 +206,7 @@ kafka_metadata_update(struct kafka_trace *trace)
 			if (fp == NULL) {
 
 				if (errno == EINTR &&
-				    kafka_graph_is_canceled(
-					kafka_trace_get_kafka_msg_iter(trace))) {
+				    kafka_graph_is_canceled(metadata->msg_iter)) {
 					status = KAFKA_ITERATOR_STATUS_AGAIN;
 				} else {
 					BT_COMP_LOGE_APPEND_CAUSE_ERRNO(self_comp,
@@ -267,8 +264,7 @@ kafka_metadata_update(struct kafka_trace *trace)
 		 */
 		status = KAFKA_ITERATOR_STATUS_ERROR;
 		if (errno == EINTR) {
-			if (kafka_graph_is_canceled(
-			    kafka_trace_get_kafka_msg_iter(trace))) {
+			if (kafka_graph_is_canceled(metadata->msg_iter)) {
 
 				status = KAFKA_ITERATOR_STATUS_AGAIN;
 			}
@@ -288,8 +284,7 @@ kafka_metadata_update(struct kafka_trace *trace)
 	BT_ASSERT_DBG(fp != NULL);
 	if (fp == NULL) {
 		if (errno == EINTR &&
-		    kafka_graph_is_canceled(
-			kafka_trace_get_kafka_msg_iter(trace))) {
+		    kafka_graph_is_canceled(metadata->msg_iter)) {
 			status = KAFKA_ITERATOR_STATUS_AGAIN;
 		} else {
 			BT_COMP_LOGE_APPEND_CAUSE_ERRNO(self_comp,
@@ -369,7 +364,8 @@ end:
 
 BT_HIDDEN int
 kafka_metadata_create(struct kafka_metadata **self,
-    bt_logging_level log_level, bt_self_component *self_comp)
+    struct kafka_msg_iter *msg_iter, bt_logging_level log_level,
+    bt_self_component *self_comp)
 {
 	struct kafka_metadata *metadata = NULL;
 	struct ctf_metadata_decoder_config cfg = {
@@ -392,6 +388,7 @@ kafka_metadata_create(struct kafka_metadata **self,
 
 	metadata->log_level = log_level;
 	metadata->self_comp = self_comp;
+	metadata->msg_iter = msg_iter;
 	metadata->decoder = ctf_metadata_decoder_create(&cfg);
 	BT_ASSERT_DBG(metadata->decoder != NULL);
 	if (metadata->decoder == NULL) {
@@ -409,21 +406,18 @@ error:
 }
 
 BT_HIDDEN void
-kafka_metadata_fini(struct kafka_trace *trace)
+kafka_metadata_destroy(struct kafka_metadata *self)
 {
-	struct kafka_metadata *metadata;
 
-	metadata = kafka_trace_get_metadata(trace);
-	if (metadata == NULL) {
+	if (self == NULL) {
 
 		return;
 	}
-	BT_ASSERT_DBG(metadata != NULL);
+	BT_ASSERT_DBG(self != NULL);
 
-	BT_ASSERT_DBG(metadata->decoder != NULL);
-	ctf_metadata_decoder_destroy(metadata->decoder);
-	kafka_trace_set_metadata(trace, NULL);
-	g_free(metadata);
+	BT_ASSERT_DBG(self->decoder != NULL);
+	ctf_metadata_decoder_destroy(self->decoder);
+	g_free(self);
 }
 
 BT_HIDDEN struct ctf_metadata_decoder *

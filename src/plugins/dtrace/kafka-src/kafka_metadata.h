@@ -44,9 +44,9 @@
 /* Forward declaration */
 struct kafka_metadata;
 
-extern int kafka_metadata_create(struct kafka_metadata **, bt_logging_level,
-    bt_self_component *);
-extern void kafka_metadata_fini(struct kafka_trace *);
+extern int kafka_metadata_create(struct kafka_metadata **,
+    struct kafka_msg_iter *, bt_logging_level, bt_self_component *);
+extern void kafka_metadata_destroy(struct kafka_metadata *);
 
 extern enum kafka_iterator_status kafka_metadata_update(struct kafka_trace *);
 extern struct ctf_metadata_decoder * kafka_metadata_get_decoder(

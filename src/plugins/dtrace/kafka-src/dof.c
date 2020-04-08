@@ -312,7 +312,7 @@ dof_load_difohdr(struct dof *dof, dof_hdr_t *hdr, dof_sec_t *sec,
 			struct bbuf *dif_buf;
 			dif_instr_t *dtdo_buf;
 
-			dtdo_buf = malloc(tmp_sec.dofs_size);
+			dtdo_buf = (dif_instr_t *) malloc(tmp_sec.dofs_size);
 
 			rc = bbuf_new(&dif_buf, (unsigned char *) dtdo_buf,
 			    tmp_sec.dofs_size, BBUF_LITTLEENDIAN);
@@ -351,7 +351,7 @@ dof_load_difohdr(struct dof *dof, dof_hdr_t *hdr, dof_sec_t *sec,
 			struct bbuf *strtab_buf;
 			unsigned char *dtdo_buf;
 
-			dtdo_buf = malloc(tmp_sec.dofs_size);
+			dtdo_buf = (unsigned char *) malloc(tmp_sec.dofs_size);
 
 			rc = bbuf_new(&strtab_buf, dtdo_buf, tmp_sec.dofs_size,
 			    BBUF_LITTLEENDIAN);
@@ -452,14 +452,16 @@ dof_load_sect(struct dof *dof, dof_hdr_t *hdr, uint32_t sec_num, dof_sec_t *sec)
 	int rc;
 	uint8_t raw_sec[sizeof(dof_sec_t)];
 	
-	off = fseek(dof->dof_fp, hdr->dofh_secoff + (sec_idx * sizeof(dof_sec_t)), SEEK_SET);
+	off = fseek(dof->dof_fp,
+	    hdr->dofh_secoff + (sec_idx * sizeof(dof_sec_t)), SEEK_SET);
 	if (off == -1) {
 
 		return -1;
 	}
 
 	/* Load the section header */ 
-	bytes = fread((void *) raw_sec, sizeof(unsigned char), sizeof(dof_sec_t), dof->dof_fp);
+	bytes = fread((void *) raw_sec, sizeof(unsigned char),
+	    sizeof(dof_sec_t), dof->dof_fp);
 	if (bytes != sizeof(dof_sec_t)) {
 
 		return -1;

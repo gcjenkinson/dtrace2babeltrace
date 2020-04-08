@@ -46,11 +46,15 @@
 #include <stdbool.h>
 #include <glib.h>
 #include <inttypes.h>
-#include "compat/mman.h"
-#include <babeltrace2/babeltrace.h>
 
+#include <babeltrace2/babeltrace.h>
+#include <librdkafka/rdkafka.h>
+
+#include "compat/mman.h"
 #include "common/assert.h"
+
 #include "kafka_metadata.h"
+#include "kafka_msg_iter.h"
 #include "kafka_stream_iter.h"
 #include "kafka_trace.h"
 
@@ -59,13 +63,14 @@ struct kafka_stream_iter {
 	bt_logging_level log_level;
 	bt_self_component *self_comp;
 	bt_stream *stream; /* Owned by this. */
-	struct kafka_trace *trace; /* Weak reference. */
+	uint8_t *buf; /* Owned by this. */
+	GString *name; /* Owned by this. */
 	struct ctf_msg_iter *msg_iter; /* Owned by this */
+	struct kafka_trace *trace; /* Weak reference. */
 	uint64_t stream_id;
 	enum kafka_stream_state state;
-	uint8_t *buf; /* Owned by this. */
+	rd_kafka_t *consumer; /* Owned by this. */
 	size_t buflen;
-	GString *name; /* Owned by this. */
 };
 
 static enum ctf_msg_iter_medium_status medop_request_bytes(
@@ -286,11 +291,14 @@ kafka_lazy_msg_init(struct kafka_trace *trace,
 	/* Validate the method's preconditions */
 	BT_ASSERT(trace != NULL);
 	BT_ASSERT(self_msg_iter != NULL);
-
-	log_level = kafka_trace_get_logging_level(trace);
-	self_comp = kafka_trace_get_self_comp(trace);
-
+	
 	stream_iter = kafka_trace_get_kafka_stream_iter(trace);
+	BT_ASSERT_DBG(stream_iter != NULL);
+
+	log_level = stream_iter->log_level;
+	self_comp = stream_iter->self_comp;
+
+	BT_ASSERT_DBG(stream_iter->msg_iter != NULL);
 	if (stream_iter->msg_iter == NULL) {
 
 		metadata = kafka_trace_get_kafka_metadata(trace);
@@ -318,21 +326,17 @@ error:
 }
 
 BT_HIDDEN struct kafka_stream_iter *
-kafka_stream_iter_create(struct kafka_trace *trace, uint64_t stream_id,
-    bt_self_message_iterator *self_msg_iter)
+kafka_stream_iter_create(bt_logging_level log_level,
+    bt_self_component * self_comp, struct kafka_trace *trace,
+    uint64_t stream_id, bt_self_message_iterator *self_msg_iter)
 {
 	struct kafka_component *kafka;
 	struct kafka_metadata *metadata;
 	struct kafka_stream_iter *stream_iter;
-	bt_logging_level log_level;
-	bt_self_component *self_comp;
 
 	/* Verify the method's preconditions */
 	BT_ASSERT(trace != NULL);
 	BT_ASSERT(self_msg_iter != NULL);
-
-	log_level = kafka_trace_get_logging_level(trace);
-	self_comp = kafka_trace_get_self_comp(trace);
 	BT_ASSERT_DBG(self_comp != NULL);
 
 	kafka = kafka_msg_iter_get_kafka_component(
@@ -364,7 +368,7 @@ kafka_stream_iter_create(struct kafka_trace *trace, uint64_t stream_id,
 		BT_ASSERT(!stream_iter->msg_iter);
 
 		stream_iter->msg_iter = ctf_msg_iter_create(ctf_tc,
-			kafka_get_max_request_sz(kafka), medops, stream_iter,
+			kafka_component_get_max_request_sz(kafka), medops, stream_iter,
 			log_level, self_comp, self_msg_iter);
 		if (stream_iter->msg_iter == NULL) {
 
@@ -373,12 +377,13 @@ kafka_stream_iter_create(struct kafka_trace *trace, uint64_t stream_id,
 
 		//ctf_msg_iter_set_emit_stream_end_message(
 		//	stream_iter->msg_iter, true);
+
 		//ctf_msg_iter_set_emit_stream_beginning_message(
 		//	stream_iter->msg_iter, true);
 	}
 
 	/* Allocate buffer store Kafka log messages */
-	stream_iter->buflen = kafka_get_max_request_sz(kafka);
+	stream_iter->buflen = kafka_component_get_max_request_sz(kafka);
 	BT_ASSERT_DBG(stream_iter->buflen > 0);
 
 	stream_iter->buf = g_new0(uint8_t, stream_iter->buflen);

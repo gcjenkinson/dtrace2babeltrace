@@ -39,6 +39,7 @@
 #define BT_LOG_TAG "PLUGIN/SRC.DTRACE.KAFKA/TRACE"
 #include "logging/comp-logging.h"
 
+#include "kafka_metadata.h"
 #include "kafka_msg_iter.h"
 #include "kafka_stream_iter.h"
 #include "kafka_trace.h"
@@ -46,12 +47,12 @@
 struct kafka_trace {
 	bt_logging_level log_level;
 	bt_self_component *self_comp;
-	struct kafka_msg_iter *msg_iter;
 	uint64_t id; /* ctf trace ID within the session. */
 	bt_trace *trace; /* Owned by this. */
 	bt_trace_class *trace_class; /* Weak reference. */
-	struct kafka_metadata *metadata;
 	const bt_clock_class *clock_class;
+	struct kafka_metadata *metadata;
+	struct kafka_msg_iter *msg_iter;
 	/* Array of pointers to struct kafka_stream_iter. */
 	/* Owned by this. */
 	GPtrArray *stream_iterators;
@@ -60,10 +61,11 @@ struct kafka_trace {
 
 BT_HIDDEN struct kafka_trace *
 kafka_create_trace(struct kafka_msg_iter *msg_iter, bt_logging_level log_level,
-    bt_self_component *self_comp, struct kafka_metadata *metadata, uint64_t trace_id)
+    bt_self_component *self_comp, uint64_t trace_id)
 {
 	struct kafka_trace *trace;
 	struct kafka_stream_iter *stream_iter;
+	int rc;
 
 	trace = g_new0(struct kafka_trace, 1);
 	if (trace == NULL) {
@@ -74,7 +76,6 @@ kafka_create_trace(struct kafka_msg_iter *msg_iter, bt_logging_level log_level,
 
 	trace->log_level = log_level;
 	trace->self_comp = self_comp;
-	trace->msg_iter = msg_iter;
 	trace->id = trace_id;
 	trace->trace_class = NULL;
 	trace->trace = NULL;
@@ -85,9 +86,11 @@ kafka_create_trace(struct kafka_msg_iter *msg_iter, bt_logging_level log_level,
 
 		goto error;
 	}
+	
+	trace->msg_iter = msg_iter;
 
-	stream_iter = kafka_stream_iter_create(trace, 0,
-	    kafka_msg_iter_get_self_msg_iter(msg_iter));
+	stream_iter = kafka_stream_iter_create(log_level, self_comp,
+	    trace, 0, kafka_msg_iter_get_self_msg_iter(msg_iter));
 	BT_ASSERT_DBG(stream_iter != NULL);
 	if (stream_iter == NULL) {
 
@@ -96,7 +99,14 @@ kafka_create_trace(struct kafka_msg_iter *msg_iter, bt_logging_level log_level,
 
 	g_ptr_array_add(trace->stream_iterators, stream_iter);
 
-	trace->metadata = metadata;
+	rc = kafka_metadata_create(&trace->metadata, msg_iter,
+	    log_level, self_comp);
+	if (rc != 0) {
+
+		BT_COMP_LOGE("Failed creating Kafka metadata\n");
+		goto error;
+	}
+
 	trace->new_metadata_needed = true;
 
 	goto end;
@@ -106,6 +116,26 @@ error:
 	trace = NULL;
 end:
 	return trace;
+}
+
+BT_HIDDEN struct kafka_metadata *
+kafka_trace_get_kafka_metadata(struct kafka_trace *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return self->metadata;
+}
+
+BT_HIDDEN struct kafka_msg_iter *
+kafka_trace_get_kafka_msg_iter(struct kafka_trace *self)
+{
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(self != NULL);
+
+	return self->msg_iter;
 }
 
 BT_HIDDEN struct bt_trace *
@@ -128,34 +158,6 @@ kafka_trace_get_kafka_stream_iter(struct kafka_trace *self)
 	return g_ptr_array_index(self->stream_iterators, 0);
 }
 
-BT_HIDDEN struct kafka_metadata *
-kafka_trace_get_kafka_metadata(struct kafka_trace *kafka_trace)
-{
-				
-	return kafka_trace->metadata;
-}
-
-BT_HIDDEN bt_logging_level
-kafka_trace_get_logging_level(struct kafka_trace *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->log_level;
-}
-
-BT_HIDDEN bt_self_component *
-kafka_trace_get_self_comp(struct kafka_trace *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-	BT_ASSERT(self->self_comp != NULL);
-
-	return self->self_comp;
-}
-
 BT_HIDDEN bool
 kafka_trace_is_new_metadata_needed(struct kafka_trace *self)
 {
@@ -176,27 +178,6 @@ kafka_trace_set_new_metadata_needed(struct kafka_trace *self, bool needed)
 	self->new_metadata_needed = needed;
 }
 
-BT_HIDDEN struct kafka_metadata *
-kafka_trace_get_metadata(struct kafka_trace *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->metadata;
-}
-
-BT_HIDDEN void
-kafka_trace_set_metadata(struct kafka_trace *self, struct kafka_metadata *metadata)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-	BT_ASSERT(metadata != NULL);
-
-	self->metadata = metadata;
-}
-
 BT_HIDDEN bt_trace_class *
 kafka_trace_get_bt_trace_class(struct kafka_trace *self)
 {
@@ -206,17 +187,6 @@ kafka_trace_get_bt_trace_class(struct kafka_trace *self)
 
 	return self->trace_class;
 }
-
-BT_HIDDEN struct kafka_msg_iter *
-kafka_trace_get_kafka_msg_iter(struct kafka_trace *self)
-{
-
-	/* Validate the method's preconditions */
-	BT_ASSERT(self != NULL);
-
-	return self->msg_iter;
-}
-
 
 BT_HIDDEN void
 kafka_trace_set_bt_trace_class(struct kafka_trace *self, bt_trace_class *tc)
