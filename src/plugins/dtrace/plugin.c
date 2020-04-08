@@ -38,6 +38,7 @@
 #include <babeltrace2/babeltrace.h>
 
 #include "kafka-src/kafka_component.h"
+#include "kafka-src/kafka_msg_iter.h"
 
 #ifndef BT_BUILT_IN_PLUGINS
 BT_PLUGIN_MODULE();
@@ -53,7 +54,7 @@ BT_PLUGIN_LICENSE("2-Clause BSD");
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_WITH_ID(auto, kafka, "kafka",
     kafka_msg_iter_next);
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_DESCRIPTION_WITH_ID(auto, kafka,
-    "Connect to Kafka topic and receive dtrace streams.");
+    "Connect to Kafka topic and receive dtrace traces.");
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_HELP_WITH_ID(auto, kafka,
     "See the babeltrace2-source.dtrace.kafka(7) manual page.");
 BT_PLUGIN_SOURCE_COMPONENT_CLASS_INITIALIZE_METHOD_WITH_ID(auto, kafka,
