@@ -65,10 +65,10 @@ struct influxdb_options {
 };
 
 struct influxdb_component {
-	struct influxdb_options options;
-	bt_message_iterator *iterator;
 	bt_self_component *self_comp;
 	bt_logging_level log_level;
+	bt_message_iterator *iterator;
+	struct influxdb_options options;
 	std::unique_ptr<influxdb::InfluxDB> client;
 	uint64_t ts_val;
 	uint32_t uniq_cnt;
@@ -90,11 +90,12 @@ static const char * const VERBOSE_OPT_NAME = VERBOSE_OPT;
 
 static const char * const IN_PORT_NAME = "in";
 
-static void destroy_influxdb_data(struct influxdb_component *);
 static struct influxdb_component* create_influxdb(bt_self_component *,
     bt_logging_level);
+static void destroy_influxdb_data(struct influxdb_component *);
 static bt_message_iterator_class_next_method_status handle_message(
     struct influxdb_component *, const bt_message *);
+
 static void apply_one_string(const char *, const bt_value *, const char **);
 static void apply_one_bool_with_default(const char *, const bt_value *,
     bool *, bool);
@@ -102,9 +103,9 @@ static void apply_one_unsigned_integer(const char *, const bt_value *,
     unsigned int *);
 static bt_component_class_initialize_method_status apply_params(
     struct influxdb_component *, const bt_value *);
-static void write_field(struct influxdb_component *, influxdb::Point &,
-    const char *, const bt_field *);
 static void write_bool(struct influxdb_component *, influxdb::Point &,
+    const char *, const bt_field *);
+static void write_field(struct influxdb_component *, influxdb::Point &,
     const char *, const bt_field *);
 static void write_integer(struct influxdb_component *, influxdb::Point &,
     const char *, const bt_field *);
@@ -151,12 +152,13 @@ static struct influxdb_component *
 create_influxdb(bt_self_component *self_comp, bt_logging_level log_level)
 {
 	struct influxdb_component *influxdb;
-	
+
 	/* Verify the method's preconditions */
 	BT_ASSERT(self_comp != NULL);
 
 	influxdb = (struct influxdb_component *) malloc(
 	    sizeof(struct influxdb_component));
+	BT_ASSERT_DBG(influxdb != NULL);
 	if (influxdb == NULL) {
 
 		goto error;
@@ -173,6 +175,22 @@ error:
 }
 
 static void
+write_bool(struct influxdb_component *influxdb, influxdb::Point &p,
+    const char *field_name, const bt_field *field)
+{
+	bt_bool v;
+
+	/* Verify the method's preconditions */
+	BT_ASSERT(influxdb != NULL);
+	BT_ASSERT(field_name != NULL);
+	BT_ASSERT(field != NULL);
+
+	v = bt_field_bool_get_value(field);
+
+	p.addField(field_name, v == true ? "true" : "false");
+}
+
+static void
 write_field(struct influxdb_component *influxdb, influxdb::Point &p,
     const char *name, const bt_field *field)
 {
@@ -181,6 +199,7 @@ write_field(struct influxdb_component *influxdb, influxdb::Point &p,
 	bt_field_class_type class_id;
 
 	/* Validate the method's preconditions */
+	BT_ASSERT(influxdb != NULL);
 	BT_ASSERT(field != NULL);
 
 	class_id = bt_field_get_class_type(field);
@@ -196,7 +215,7 @@ write_field(struct influxdb_component *influxdb, influxdb::Point &p,
 	 case BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER:
 		/* FALLTHROUGH */
 	 case BT_FIELD_CLASS_TYPE_SIGNED_INTEGER:
-		
+
 		write_integer(influxdb, p, name, field);
 		break;
 	case BT_FIELD_CLASS_TYPE_BIT_ARRAY:
@@ -207,22 +226,6 @@ write_field(struct influxdb_component *influxdb, influxdb::Point &p,
 		BT_COMP_LOGW("class_id %ld unimplemented\n", class_id);
 		break;
 	}
-}
-
-static void
-write_bool(struct influxdb_component *influxdb, influxdb::Point &p,
-    const char *field_name, const bt_field *field)
-{
-	bt_bool v;
-
-	/* Verify the method's preconditions */
-	BT_ASSERT(influxdb != NULL);
-	BT_ASSERT(field_name != NULL);
-	BT_ASSERT(field != NULL);
-
-	v = bt_field_bool_get_value(field);
-		
-	p.addField(field_name, v == true ? "true" : "false");
 }
 
 static void
@@ -270,7 +273,7 @@ write_struct(struct influxdb_component *influxdb, influxdb::Point &p,
 	/* Iterate the structures fields  adding each to the Point */
 	nr_fields = bt_field_class_structure_get_member_count(struct_class);
 	for (uint64_t i = 0; i < nr_fields; i++) {
-	
+
 		const bt_field *struct_field;
 		const bt_field_class_structure_member *struct_member;
 
@@ -283,7 +286,7 @@ write_struct(struct influxdb_component *influxdb, influxdb::Point &p,
 		    bt_field_structure_borrow_member_field_by_index_const(
 		    field, i);
 		BT_ASSERT_DBG(struct_field != NULL);
-			
+
 		write_struct_field(influxdb, p, field_name, struct_member,
 		    struct_field);
 	}
@@ -295,7 +298,7 @@ write_struct_field(struct influxdb_component *influxdb,
     const bt_field_class_structure_member *member, const bt_field *field)
 {
 	const char *member_field_name;
-	
+
 	/* Validate the method's preconditions */
 	BT_ASSERT(influxdb != NULL);
 	BT_ASSERT(member != NULL);
@@ -330,6 +333,10 @@ handle_message(struct influxdb_component *influxdb, const bt_message *message)
 
 		BT_COMP_LOGD("Stream beginning\n");
 		break;
+	case BT_MESSAGE_TYPE_STREAM_END:
+
+		BT_COMP_LOGD("Stream end\n");
+		break;
 	case BT_MESSAGE_TYPE_EVENT: {
 		const bt_clock_snapshot *clock_snapshot;
 		const bt_field *main_field;
@@ -344,7 +351,7 @@ handle_message(struct influxdb_component *influxdb, const bt_message *message)
 		/* Event Header */
 		ev_name = bt_event_class_get_name(event_class);
 		BT_ASSERT_DBG(ev_name != NULL);
-		
+
 		/* Construct Point to format HTTP post request
 		 * to InfluxDB.
 		 */
@@ -361,16 +368,16 @@ handle_message(struct influxdb_component *influxdb, const bt_message *message)
 		    bt_message_event_borrow_default_clock_snapshot_const(
 		    message);
 		BT_ASSERT_DBG(clock_snapshot != NULL);
-			
+
 		ts_val = bt_clock_snapshot_get_value(clock_snapshot);
 		if (influxdb->ts_val == ts_val) {
 
-			/* ts_val is not unique, therefore add a uniq tag to 
+			/* ts_val is not unique, therefore add a uniq tag to
 			 * the point.
 			 */
 			p.addTag("uniq", std::to_string(influxdb->uniq_cnt++));
 		} else {
-			
+
 			influxdb->ts_val = ts_val;
 			influxdb->uniq_cnt = 1;
 		}
@@ -380,12 +387,14 @@ handle_message(struct influxdb_component *influxdb, const bt_message *message)
 		    std::chrono::nanoseconds(ts_val)));
 
 		if (influxdb->options.verbose) {
+
 			BT_COMP_LOGI("Writing %s to InfluxDB\n",
 			    p.toLineProtocol().c_str());
 	    	}
 
 		/* Write the measurement to InfuxDB */
 		try {
+
 			influxdb->client->write(std::move(p));
 		} catch (std::exception& e) {
 
@@ -453,7 +462,7 @@ apply_one_unsigned_integer(const char *key, const bt_value *params,
 
 		goto end;
 	}
-	
+
 	BT_ASSERT_DBG(value != NULL);
 	val = bt_value_integer_unsigned_get(value);
 	*option = val;
@@ -566,13 +575,15 @@ influxdb_init(bt_self_component_sink *self_comp_sink,
 	bt_logging_level log_level;
 
 	/* Validate the method's preconditions */
-	BT_ASSERT(self_comp_sink != NULL);	
-	BT_ASSERT(params != NULL);	
+	BT_ASSERT(self_comp_sink != NULL);
+	BT_ASSERT(params != NULL);
 
 	self_comp = bt_self_component_sink_as_self_component(self_comp_sink);
 	BT_ASSERT_DBG(self_comp != NULL);
+
 	comp = bt_self_component_as_component(self_comp);
 	BT_ASSERT_DBG(comp != NULL);
+
 	log_level = bt_component_get_logging_level(comp);
 
 	influxdb = create_influxdb(self_comp, log_level);
@@ -581,13 +592,17 @@ influxdb_init(bt_self_component_sink *self_comp_sink,
 		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_MEMORY_ERROR;
 		goto error;
 	}
+	BT_ASSERT_DBG(influxdb != NULL);
 
 	influxdb->ts_val = 0;
 	influxdb->uniq_cnt = 1;
 
 	add_port_status = bt_self_component_sink_add_input_port(
-		self_comp_sink, IN_PORT_NAME, NULL, NULL);
+	    self_comp_sink, IN_PORT_NAME, NULL, NULL);
 	switch (add_port_status) {
+	case BT_SELF_COMPONENT_ADD_PORT_STATUS_OK:
+		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK;
+		break;
 	case BT_SELF_COMPONENT_ADD_PORT_STATUS_MEMORY_ERROR:
 		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_MEMORY_ERROR;
 		goto error;
@@ -600,6 +615,7 @@ influxdb_init(bt_self_component_sink *self_comp_sink,
 
 	status = apply_params(influxdb, params);
 	if (status != BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK) {
+
 		goto error;
 	}
 
@@ -624,6 +640,7 @@ influxdb_finalize(bt_self_component_sink *comp)
 
 		return;
 	}
+	BT_ASSERT_DBG(comp != NULL);
 
 	self = (struct influxdb_component *) bt_self_component_get_data(
 	    bt_self_component_sink_as_self_component(comp));
@@ -642,10 +659,10 @@ influxdb_consume(bt_self_component_sink *comp)
 	struct influxdb_component *influxdb;
 	bt_message_iterator_next_status next_status;
 	uint64_t count = 0, i = 0;
-	
+
 	/* Verify the method's preconditions */
 	BT_ASSERT(comp != NULL);
-	
+
 	influxdb = (struct influxdb_component *) bt_self_component_get_data(
 	    bt_self_component_sink_as_self_component(comp));
 	BT_ASSERT_DBG(influxdb);
@@ -689,6 +706,9 @@ influxdb_consume(bt_self_component_sink *comp)
 	}
 
 end:
+	/* Unreference any messages after any error occurs in
+	 * handle_message() - freeing th ememory.
+	 */
 	for (; i < count; i++) {
 
 		bt_message_put_ref(msgs[i]);
