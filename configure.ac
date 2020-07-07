@@ -31,8 +31,8 @@ AC_TYPE_UINT8_T
 # User variables
 
 # BABELTRACE_SOURCE_DIR: Babeltrace source directory
-AC_ARG_VAR([BABELTRACE_SOURCE_DIR], [babeltrace source directory [~/babeltrace]])
-AS_IF([test "x$BABELTRACE_SOURCE_DIR" = x], [BABELTRACE_SOURCE_DIR='~/babeltrace'])
+AC_ARG_VAR([BABELTRACE_SOURCE_DIR], [babeltrace source directory [$${HOME}/babeltrace]])
+AS_IF([test "x$BABELTRACE_SOURCE_DIR" = x], [BABELTRACE_SOURCE_DIR='${HOME}/babeltrace'])
 
 # BABELTRACE_PLUGINS_DIR: Plugins directory
 AC_ARG_VAR([BABELTRACE_PLUGINS_DIR], [built-in plugins install directory [LIBDIR/babeltrace2/plugins]])
