@@ -1,1 +1,1 @@
-SUBDIRS = db dtrace
+SUBDIRS = db dtrace opentracing

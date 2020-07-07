@@ -48,7 +48,9 @@ AC_CONFIG_FILES([Makefile
 	src/plugins/db/influxdb/influxdb-cxx/src/Makefile
 	src/plugins/dtrace/Makefile
 	src/plugins/dtrace/kafka-src/Makefile
-	src/plugins/dtrace/kafka-src/ctf-writer/Makefile])
+	src/plugins/dtrace/kafka-src/ctf-writer/Makefile
+	src/plugins/opentracing/Makefile
+	src/plugins/opentracing/jaeger/Makefile])
 LT_INIT([shared disable-static])
 
 # Checks for library functions.
