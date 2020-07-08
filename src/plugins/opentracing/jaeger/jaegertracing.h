@@ -41,7 +41,6 @@
 extern "C" {
 #endif
 
-#include <glib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include "common/macros.h"

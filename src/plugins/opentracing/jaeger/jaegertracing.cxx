@@ -57,6 +57,8 @@ extern "C" {
 #include <exception>
 #include <string>
 
+#include <jaegertracing/Tracer.h>
+
 struct jaeger_options {
 	bool verbose;
 };
@@ -66,6 +68,8 @@ struct jaeger_component {
 	bt_logging_level log_level;
 	bt_message_iterator *iterator;
 	struct jaeger_options options;
+	std::shared_ptr<jaegertracing::Tracer> tracer;
+	std::unordered_map<std::string, std::unique_ptr<opentracing::Span>> spans;
 };
 
 #define BATCH_OPT "batch"
@@ -103,10 +107,13 @@ static void write_field(struct jaeger_component *,
     const char *, const bt_field *);
 static void write_integer(struct jaeger_component *,
     const char *, const bt_field *);
+static void write_static_array(struct jaeger_component *,
+    const char *, const bt_field *);
 static void write_struct(struct jaeger_component *,
     const char *, const bt_field *);
 static void write_struct_field(struct jaeger_component *,
-    const char *, const bt_field_class_structure_member *, const bt_field *);
+    const char *, const bt_field_class_structure_member *,
+    const bt_field *);
 
 static struct bt_param_validation_map_value_entry_descr jaeger_params[] = {
 	{ BATCH_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
@@ -212,8 +219,11 @@ write_field(struct jaeger_component *jaeger,
 
 		write_integer(jaeger, name, field);
 		break;
-	case BT_FIELD_CLASS_TYPE_BIT_ARRAY:
 	case BT_FIELD_CLASS_TYPE_STATIC_ARRAY:
+
+		write_static_array(jaeger, name, field);
+		break;
+	case BT_FIELD_CLASS_TYPE_BIT_ARRAY:
 		/* FALLTHROUGH */
 	default:
 		/* TODO: implement other types  */
@@ -249,6 +259,59 @@ write_integer(struct jaeger_component *jaeger,
 		//    bt_field_integer_unsigned_get_value(field));
 	}
 }
+
+static void
+write_static_array(struct jaeger_component *jaeger,
+    const char *field_name, const bt_field *field)
+{
+	const bt_field_class *array_class = NULL;
+	uint64_t nr_fields;
+	bt_self_component *self_comp = jaeger->self_comp;
+	bt_logging_level log_level = jaeger->log_level;
+
+	/* Validate the method's preconditions */
+	BT_ASSERT(jaeger != NULL);
+	BT_ASSERT(field != NULL);
+
+	array_class = bt_field_borrow_class_const(field);
+	BT_ASSERT_DBG(array_class != NULL);
+
+	bt_field_class_type array_class_type =
+	    bt_field_class_get_type(array_class);
+
+	uint64_t len = bt_field_class_array_static_get_length(
+	    array_class);
+
+	/* Interate across the array members */
+	for (uint64_t i = 0; i < len; i++) {
+
+		const bt_field *field =
+		    bt_field_array_borrow_element_field_by_index_const(
+		    field, i);
+		
+		switch (array_class_type) {
+		case BT_FIELD_CLASS_TYPE_BOOL:
+
+			break;
+		case BT_FIELD_CLASS_TYPE_UNSIGNED_INTEGER: {
+
+		    	uint64_t val = bt_field_integer_unsigned_get_value(field);
+			break;
+		}
+		case BT_FIELD_CLASS_TYPE_SIGNED_INTEGER: {
+
+		    	int64_t val = bt_field_integer_signed_get_value(field);
+			break;
+		}
+		default:
+			/* TODO: implement other types  */
+			BT_COMP_LOGW("class_id %ld unimplemented\n",
+			    array_class_type);
+			break;
+		}
+	}
+}
+
 
 static void
 write_struct(struct jaeger_component *jaeger,
@@ -346,11 +409,19 @@ handle_message(struct jaeger_component *jaeger, const bt_message *message)
 		ev_name = bt_event_class_get_name(event_class);
 		BT_ASSERT_DBG(ev_name != NULL);
 
+		/* Parse the ev_name 4-tuple */
+		std::string event_name = 
+		    bt_event_class_get_name(event_class);
+		std::size_t found = event_name.find_last_of(":");
+		std::string name = event_name.substr(found);
+		std::string prov_mod_func = event_name.substr(0, found);
+
 		/* Payload */
 		main_field = bt_event_borrow_payload_field_const(event);
 		BT_ASSERT_DBG(main_field != NULL);
 
 		write_field(jaeger, NULL, main_field);
+		const char *sc_raw = "605cea753b982c7d:605cea753b982c7d:1";
 
 		/* Write the clock snapshot value */
 		clock_snapshot =
@@ -359,6 +430,50 @@ handle_message(struct jaeger_component *jaeger, const bt_message *message)
 		BT_ASSERT_DBG(clock_snapshot != NULL);
 
 		ts_val = bt_clock_snapshot_get_value(clock_snapshot);
+	
+		if (name == "entry") {
+
+			opentracing::StartSpanOptions options;
+
+			/* Construct the Span options from the trace records */
+			std::chrono::duration<long> dur(ts_val);
+			std::chrono::time_point<std::chrono::system_clock> dt(dur);
+			auto st = opentracing::StartTimestamp(dt);
+			st.Apply(options);
+
+			std::stringstream sc_ss(sc_raw);
+
+			auto sc = jaegertracing::SpanContext::fromStream(sc_ss);
+			auto sr = opentracing::SpanReference(
+			    opentracing::SpanReferenceType::ChildOfRef, &sc);
+			sr.Apply(options);
+
+			/* Start the span and store*/
+			auto span = (*jaeger->tracer).StartSpanWithOptions(
+			    event_name, options);
+
+			jaeger->spans[prov_mod_func] = std::move(span);
+		} else if (name == "return") {
+
+			/* Lookup matching span */
+			auto span = jaeger->spans.find(prov_mod_func);
+			if (span != jaeger->spans.end()) {
+
+				opentracing::FinishSpanOptions options;
+
+
+				/* Construct the Span options from the trace
+				 * records
+				 */
+				std::chrono::duration<long> dur(ts_val);
+				std::chrono::time_point<std::chrono::steady_clock> dt(dur);
+				auto ft = opentracing::FinishTimestamp(dt);
+				ft.Apply(options);
+
+				/* Finish the span */
+				span->second->FinishWithOptions(options);
+			} 
+		}
 
 		break;
 	}
@@ -495,6 +610,17 @@ apply_params(struct jaeger_component *jaeger, const bt_value *params)
 	apply_one_string(PWD_OPT_NAME, params, &passwd);
 	apply_one_bool_with_default(VERBOSE_OPT_NAME, params,
 	    &jaeger->options.verbose, false);
+
+	/* Construct Trace config from environment */
+	auto config = jaegertracing::Config();
+	config.fromEnv();
+
+	/* Construct the Tracer */
+	auto tracer = jaegertracing::Tracer::make(
+            "example-service", config,
+	    jaegertracing::logging::consoleLogger());
+	jaeger->tracer = std::dynamic_pointer_cast<
+	    jaegertracing::Tracer>(tracer);
 
 end:
 	g_free(validate_error);
