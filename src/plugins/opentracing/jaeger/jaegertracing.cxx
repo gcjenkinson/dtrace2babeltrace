@@ -72,18 +72,8 @@ struct jaeger_component {
 	std::unordered_map<std::string, std::unique_ptr<opentracing::Span>> spans;
 };
 
-#define BATCH_OPT "batch"
-#define PWD_OPT "pwd"
-#define TAGS_OPT "tags"
-#define USER_OPT "user"
-#define URI_OPT "uri"
 #define VERBOSE_OPT "verbose"
 
-static const char * const BATCH_OPT_NAME = BATCH_OPT;
-static const char * const PWD_OPT_NAME = PWD_OPT;
-static const char * const TAGS_OPT_NAME = TAGS_OPT;
-static const char * const USER_OPT_NAME = USER_OPT;
-static const char * const URI_OPT_NAME = URI_OPT;
 static const char * const VERBOSE_OPT_NAME = VERBOSE_OPT;
 
 static const char * const IN_PORT_NAME = "in";
@@ -116,14 +106,6 @@ static void write_struct_field(struct jaeger_component *,
     const bt_field *);
 
 static struct bt_param_validation_map_value_entry_descr jaeger_params[] = {
-	{ BATCH_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
-    	    { .type = BT_VALUE_TYPE_SIGNED_INTEGER} },
-    	{ PWD_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
-    	    { .type = BT_VALUE_TYPE_STRING } },
-    	{ URI_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_MANDATORY,
-    	    { .type = BT_VALUE_TYPE_STRING } },
-    	{ USER_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
-    	    { .type = BT_VALUE_TYPE_STRING } },
     	{ VERBOSE_OPT, BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_OPTIONAL,
     	   { .type = BT_VALUE_TYPE_BOOL } },
     	BT_PARAM_VALIDATION_MAP_VALUE_ENTRY_END
@@ -157,16 +139,19 @@ create_jaeger(bt_self_component *self_comp, bt_logging_level log_level)
 	/* Verify the method's preconditions */
 	BT_ASSERT(self_comp != NULL);
 
-	jaeger = (struct jaeger_component *) malloc(
-	    sizeof(struct jaeger_component));
-	BT_ASSERT_DBG(jaeger != NULL);
-	if (jaeger == NULL) {
+	/* Construct Tracer config from environment */
+	auto config = jaegertracing::Config();
+	config.fromEnv();
 
-		goto error;
-	}
+	/* Construct the Tracer */
+	auto tracer = jaegertracing::Tracer::make(
+            config.serviceName(), config,
+	    jaegertracing::logging::consoleLogger());
+	const auto jtracer = std::dynamic_pointer_cast<jaegertracing::Tracer>(tracer);
 
-	jaeger->self_comp = self_comp;
-	jaeger->log_level = log_level;
+	/* Construct the Jaeger component */
+	jaeger = new jaeger_component {self_comp, log_level, nullptr,
+	    {false}, jtracer};
 
 	return jaeger;
 
@@ -449,7 +434,8 @@ handle_message(struct jaeger_component *jaeger, const bt_message *message)
 			sr.Apply(options);
 
 			/* Start the span and store*/
-			auto span = (*jaeger->tracer).StartSpanWithOptions(
+			auto span =
+			    (*jaeger->tracer).StartSpanWithOptions(
 			    event_name, options);
 
 			jaeger->spans[prov_mod_func] = std::move(span);
@@ -604,23 +590,8 @@ apply_params(struct jaeger_component *jaeger, const bt_value *params)
 	}
 
 	/* Parse the parameters. */
-	apply_one_unsigned_integer(BATCH_OPT_NAME, params, &batch);
-	apply_one_string(URI_OPT_NAME, params, &uri);
-	apply_one_string(USER_OPT_NAME, params, &user);
-	apply_one_string(PWD_OPT_NAME, params, &passwd);
 	apply_one_bool_with_default(VERBOSE_OPT_NAME, params,
 	    &jaeger->options.verbose, false);
-
-	/* Construct Trace config from environment */
-	auto config = jaegertracing::Config();
-	config.fromEnv();
-
-	/* Construct the Tracer */
-	auto tracer = jaegertracing::Tracer::make(
-            "example-service", config,
-	    jaegertracing::logging::consoleLogger());
-	jaeger->tracer = std::dynamic_pointer_cast<
-	    jaegertracing::Tracer>(tracer);
 
 end:
 	g_free(validate_error);
@@ -675,7 +646,7 @@ jaeger_init(bt_self_component_sink *self_comp_sink,
 		status = BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_ERROR;
 		goto error;
 	}
-
+       	
 	status = apply_params(jaeger, params);
 	if (status != BT_COMPONENT_CLASS_INITIALIZE_METHOD_STATUS_OK) {
 
