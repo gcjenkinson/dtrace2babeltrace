@@ -139,24 +139,28 @@ create_jaeger(bt_self_component *self_comp, bt_logging_level log_level)
 	/* Verify the method's preconditions */
 	BT_ASSERT(self_comp != NULL);
 
-	/* Construct Tracer config from environment */
-	auto config = jaegertracing::Config();
-	config.fromEnv();
+	try {
+		/* Construct Tracer config from environment */
+		auto config = jaegertracing::Config();
+		config.fromEnv();
 
-	/* Construct the Tracer */
-	auto tracer = jaegertracing::Tracer::make(
-            config.serviceName(), config,
-	    jaegertracing::logging::consoleLogger());
-	const auto jtracer = std::dynamic_pointer_cast<jaegertracing::Tracer>(tracer);
+		/* Construct the Tracer */
+		auto tracer = jaegertracing::Tracer::make(
+		    config.serviceName(), config,
+		    jaegertracing::logging::consoleLogger());
+		const auto jtracer = std::dynamic_pointer_cast<jaegertracing::Tracer>(tracer);
 
-	/* Construct the Jaeger component */
-	jaeger = new jaeger_component {self_comp, log_level, nullptr,
-	    {false}, jtracer};
+		/* Construct the Jaeger component */
+		jaeger = new jaeger_component {self_comp, log_level, nullptr,
+		    {false}, jtracer};
 
-	return jaeger;
+		return jaeger;
+	} catch (std::invalid_argument &e) {
 
+		BT_COMP_LOGE_APPEND_CAUSE(self_comp, "%s", e.what());
+	}
 error:
-	BT_COMP_LOGE("Failed constructing InfluxDB component\n");
+	BT_COMP_LOGE("Failed constructing Jaegertracing component\n");
 	return NULL;
 }
 
